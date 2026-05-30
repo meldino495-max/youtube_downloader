@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import tkinter as tk
-from pathlib import Path
 
-APP_DIR = Path(__file__).resolve().parent
-ICON_ICO = APP_DIR / "assets" / "icon.ico"
-ICON_PNG = APP_DIR / "assets" / "icon.png"
+from paths_config import get_resource_dir
+
+_RESOURCE_DIR = get_resource_dir()
+ICON_ICO = _RESOURCE_DIR / "assets" / "icon.ico"
+ICON_PNG = _RESOURCE_DIR / "assets" / "icon.png"
 
 
 def apply_window_icon(window: tk.Tk | tk.Toplevel) -> None:

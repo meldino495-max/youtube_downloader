@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from paths_config import (
+    APP_DIR,
     InstallPaths,
     find_ffmpeg_exe,
     find_node_exe,
@@ -20,7 +21,6 @@ from paths_config import (
 ProgressCallback = Callable[[str], None]
 PercentCallback = Callable[[float, str], None]
 
-APP_DIR = Path(__file__).resolve().parent
 TOOLS_DIR = APP_DIR / "tools"
 VENV_DIR = APP_DIR / ".venv"
 

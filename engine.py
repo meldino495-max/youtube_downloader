@@ -16,6 +16,7 @@ from dedupe import (
     url_kind_label,
 )
 from paths_config import (
+    APP_DIR,
     InstallPaths,
     ensure_ytdlp_on_path,
     find_ffmpeg_exe,
@@ -23,7 +24,6 @@ from paths_config import (
     ytdlp_is_ready,
 )
 
-APP_DIR = Path(__file__).resolve().parent
 TOOLS_DIR = APP_DIR / "tools"
 
 ProgressCallback = Callable[[str], None]
@@ -107,8 +107,8 @@ def detect_js_runtime_source(paths: Optional[InstallPaths] = None) -> tuple[bool
     custom = install_paths.nodejs_dir / "node.exe"
     if custom.is_file():
         return True, f"Node.js: {custom}"
-    system = shutil.which("node")
-    if system:
+    system = find_node_exe(install_paths)
+    if system and system != custom:
         return True, f"Node.js（系统 PATH）: {system}"
     for name in ("deno", "bun"):
         path = shutil.which(name)

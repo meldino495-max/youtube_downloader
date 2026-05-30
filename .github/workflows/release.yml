@@ -33,6 +33,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --onefile --windowed `
             --name "YouTubeDownloader" `
+            --icon "assets/icon.ico" `
             --add-data "assets;assets" `
             --hidden-import=yt_dlp `
             --collect-submodules yt_dlp `

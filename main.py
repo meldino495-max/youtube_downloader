@@ -35,10 +35,15 @@ from ui_styles import (
     rounded_entry,
     styled_text,
 )
-from paths_config import InstallPaths, find_ffmpeg_exe, find_node_exe, save_install_paths, ytdlp_is_ready
-
-APP_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = APP_DIR / "config.json"
+from paths_config import (
+    APP_DIR,
+    CONFIG_PATH,
+    InstallPaths,
+    find_ffmpeg_exe,
+    find_node_exe,
+    save_install_paths,
+    ytdlp_is_ready,
+)
 
 FORMAT_OPTIONS = [
     ("best", "最佳质量"),
