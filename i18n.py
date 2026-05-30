@@ -1,0 +1,526 @@
+"""UI translations: zh, en, ru, uk."""
+
+from __future__ import annotations
+
+import locale
+import os
+from typing import Any, Optional
+
+FORMAT_KEYS = (
+    "best",
+    "2160",
+    "1440",
+    "1080",
+    "720",
+    "480",
+    "360",
+    "240",
+    "audio",
+)
+
+LANGUAGES = ("zh", "en", "ru", "uk")
+
+LANG_LABELS = {
+    "zh": "中文",
+    "en": "English",
+    "ru": "Русский",
+    "uk": "Українська",
+}
+
+_CURRENT = "en"
+
+_MESSAGES: dict[str, dict[str, str]] = {
+    "zh": {
+        "app.title": "YouTube 下载器",
+        "app.subtitle": "粘贴 YouTube 链接，选择格式，一键下载",
+        "lang.label": "界面语言:",
+        "url.card": "视频链接（每行一个，支持单个视频 / 播放列表 / 频道）",
+        "url.paste": "从剪贴板粘贴",
+        "url.clear": "清空",
+        "url.resize_hint": "↕ 拖动下方分隔条可调整链接区域高度",
+        "options.card": "下载选项",
+        "options.quality": "画质:",
+        "options.subtitles": "下载字幕",
+        "options.save": "保存到:",
+        "options.pick_folder": "选择文件夹",
+        "options.open_folder": "打开文件夹",
+        "dir.unset": "（请点击「选择文件夹」）",
+        "options.cookies": "Cookies:",
+        "options.cookies_pick": "选择",
+        "action.download": "开始下载",
+        "action.cancel": "取消",
+        "status.ready": "就绪",
+        "status.preparing": "准备下载…",
+        "status.cancelling": "正在取消…",
+        "status.installing": "正在{title}…",
+        "env.checking": "环境检测中…",
+        "env.summary": "环境:  {y} yt-dlp ({y_ver})   {f} ffmpeg ({f_hint})   {n} Node.js ({n_hint})",
+        "env.not_installed": "未安装",
+        "env.installed": "已安装",
+        "paths.show": "显示安装位置",
+        "paths.hide": "隐藏安装位置",
+        "paths.title": "安装位置（安装前可自定义）:",
+        "paths.browse_ytdlp": "选择 yt-dlp 安装文件夹",
+        "paths.browse_ffmpeg": "选择 ffmpeg 安装文件夹",
+        "paths.browse_node": "选择 Node.js 安装文件夹",
+        "paths.browse": "浏览",
+        "log.show": "显示日志",
+        "log.hide": "隐藏日志",
+        "log.card": "日志",
+        "sources.footer": "下载源: {ytdlp}  ·  {ffmpeg}  ·  {nodejs}",
+        "format.best": "最佳质量",
+        "format.2160": "4K (2160p)",
+        "format.1440": "2K (1440p)",
+        "format.1080": "1080p",
+        "format.720": "720p",
+        "format.480": "480p",
+        "format.360": "360p",
+        "format.240": "240p",
+        "format.audio": "仅音频 MP3",
+        "msg.clipboard.title": "剪贴板",
+        "msg.clipboard.empty": "剪贴板为空或无法读取。",
+        "msg.dir.pick_title": "选择下载保存文件夹",
+        "msg.dir.bad_title": "保存路径",
+        "msg.dir.bad": "无法使用该文件夹:\n{err}",
+        "msg.dir.ok_title": "保存路径",
+        "msg.dir.ok": "已选择文件夹:\n{path}",
+        "msg.dir.open_fail": "无法打开文件夹:\n{path}\n\n{err}",
+        "msg.dir.need_pick": "请先点击「选择文件夹」选择下载保存位置。",
+        "msg.dir.mkdir_fail": "无法创建或访问该文件夹:\n{path}\n\n{err}",
+        "msg.cookie.title": "选择 cookies.txt",
+        "msg.wait.title": "请稍候",
+        "msg.wait.busy": "当前有任务正在进行，请稍后再安装。",
+        "msg.missing.title": "缺少依赖",
+        "msg.missing.body": "检测到未安装: {items}\n\n是否现在自动安装？\n（yt-dlp 来自 GitHub/PyPI，ffmpeg 来自 ffbinaries.com）",
+        "msg.node.title": "建议安装 Node.js",
+        "msg.node.body": "未检测到 Node.js。\n\n是否从 {url} 下载安装？",
+        "msg.node.download": "未检测到 Node.js。\n是否从 {url} 安装？\n（点「否」可继续尝试下载）",
+        "msg.install.done_title": "安装完成",
+        "msg.install.done": "{title}完成。",
+        "msg.install.fail_title": "安装失败",
+        "msg.install.fail": "{err}\n\n也可手动运行 setup.bat。",
+        "msg.ytdlp.ok": "yt-dlp 已安装: {ver}",
+        "msg.ffmpeg.ok": "ffmpeg 已安装: {hint}",
+        "msg.node.ok": "Node.js 已安装。",
+        "msg.deps.ok_title": "依赖",
+        "msg.deps.ok": "yt-dlp、ffmpeg、Node.js 均已就绪。",
+        "msg.install.all": "安装全部组件",
+        "msg.install.ytdlp": "安装 yt-dlp（{url}）",
+        "msg.install.ffmpeg": "安装 ffmpeg（{url}）",
+        "msg.install.node": "安装 Node.js（{url}）",
+        "msg.url.title": "链接",
+        "msg.url.empty": "请输入至少一个有效的 YouTube 链接。",
+        "msg.missing.dl": "下载前需要 yt-dlp 和 ffmpeg。\n是否现在自动安装？",
+        "msg.cookie.missing": "指定的 cookies.txt 不存在。",
+        "msg.done.title": "下载完成",
+        "msg.fail.title": "下载失败",
+        "msg.quit.title": "退出",
+        "msg.quit.body": "下载仍在进行，确定要退出吗？",
+        "log.install.start": "—— 开始{title} ——",
+        "log.install.fail": "安装失败: {err}",
+        "log.dl.start": "—— 开始下载 ——",
+        "log.dl.format": "格式: {fmt}",
+        "log.dl.dir": "保存目录: {dir}",
+        "log.dl.done": "完成：{summary}",
+        "log.dl.cancelled": "已取消下载。",
+        "log.dl.error": "错误: {err}",
+        "log.dl.summary_ok": "成功 {n} 个链接",
+        "log.dl.summary_fail": "失败 {n} 个",
+        "log.dl.summary_skip": "跳过 {n} 个重复视频",
+        "log.cancel": "正在取消…",
+        "status.cancelled": "已取消",
+        "sep.list": "、",
+    },
+    "en": {
+        "app.title": "YouTube Downloader",
+        "app.subtitle": "Paste YouTube links, choose quality, download",
+        "lang.label": "Language:",
+        "url.card": "Video links (one per line: video / playlist / channel)",
+        "url.paste": "Paste from clipboard",
+        "url.clear": "Clear",
+        "url.resize_hint": "↕ Drag the splitter below to resize the link area",
+        "options.card": "Download options",
+        "options.quality": "Quality:",
+        "options.subtitles": "Download subtitles",
+        "options.save": "Save to:",
+        "options.pick_folder": "Choose folder",
+        "options.open_folder": "Open folder",
+        "dir.unset": "(Click «Choose folder»)",
+        "options.cookies": "Cookies:",
+        "options.cookies_pick": "Browse",
+        "action.download": "Start download",
+        "action.cancel": "Cancel",
+        "status.ready": "Ready",
+        "status.preparing": "Preparing…",
+        "status.cancelling": "Cancelling…",
+        "status.installing": "{title}…",
+        "env.checking": "Checking environment…",
+        "env.summary": "Env:  {y} yt-dlp ({y_ver})   {f} ffmpeg ({f_hint})   {n} Node.js ({n_hint})",
+        "env.not_installed": "not installed",
+        "env.installed": "installed",
+        "paths.show": "Show install paths",
+        "paths.hide": "Hide install paths",
+        "paths.title": "Install paths (customize before install):",
+        "paths.browse_ytdlp": "Choose yt-dlp folder",
+        "paths.browse_ffmpeg": "Choose ffmpeg folder",
+        "paths.browse_node": "Choose Node.js folder",
+        "paths.browse": "Browse",
+        "log.show": "Show log",
+        "log.hide": "Hide log",
+        "log.card": "Log",
+        "sources.footer": "Sources: {ytdlp}  ·  {ffmpeg}  ·  {nodejs}",
+        "format.best": "Best quality",
+        "format.2160": "4K (2160p)",
+        "format.1440": "2K (1440p)",
+        "format.1080": "1080p",
+        "format.720": "720p",
+        "format.480": "480p",
+        "format.360": "360p",
+        "format.240": "240p",
+        "format.audio": "Audio only (MP3)",
+        "msg.clipboard.title": "Clipboard",
+        "msg.clipboard.empty": "Clipboard is empty or unavailable.",
+        "msg.dir.pick_title": "Choose download folder",
+        "msg.dir.bad_title": "Save path",
+        "msg.dir.bad": "Cannot use this folder:\n{err}",
+        "msg.dir.ok_title": "Save path",
+        "msg.dir.ok": "Folder selected:\n{path}",
+        "msg.dir.open_fail": "Cannot open folder:\n{path}\n\n{err}",
+        "msg.dir.need_pick": "Please choose a download folder first.",
+        "msg.dir.mkdir_fail": "Cannot create or access folder:\n{path}\n\n{err}",
+        "msg.cookie.title": "Choose cookies.txt",
+        "msg.wait.title": "Please wait",
+        "msg.wait.busy": "Another task is running. Try again later.",
+        "msg.missing.title": "Missing dependencies",
+        "msg.missing.body": "Not installed: {items}\n\nInstall now?\n(yt-dlp from GitHub/PyPI, ffmpeg from ffbinaries.com)",
+        "msg.node.title": "Install Node.js",
+        "msg.node.body": "Node.js not found.\n\nDownload from {url}?",
+        "msg.node.download": "Node.js not found.\nInstall from {url}?\n(Click No to try downloading anyway)",
+        "msg.install.done_title": "Install complete",
+        "msg.install.done": "{title} finished.",
+        "msg.install.fail_title": "Install failed",
+        "msg.install.fail": "{err}\n\nYou can also run setup.bat manually.",
+        "msg.ytdlp.ok": "yt-dlp installed: {ver}",
+        "msg.ffmpeg.ok": "ffmpeg installed: {hint}",
+        "msg.node.ok": "Node.js is installed.",
+        "msg.deps.ok_title": "Dependencies",
+        "msg.deps.ok": "yt-dlp, ffmpeg, and Node.js are ready.",
+        "msg.install.all": "Install all components",
+        "msg.install.ytdlp": "Install yt-dlp ({url})",
+        "msg.install.ffmpeg": "Install ffmpeg ({url})",
+        "msg.install.node": "Install Node.js ({url})",
+        "msg.url.title": "Links",
+        "msg.url.empty": "Enter at least one valid YouTube link.",
+        "msg.missing.dl": "yt-dlp and ffmpeg are required.\nInstall now?",
+        "msg.cookie.missing": "The specified cookies.txt does not exist.",
+        "msg.done.title": "Download complete",
+        "msg.fail.title": "Download failed",
+        "msg.quit.title": "Quit",
+        "msg.quit.body": "Download in progress. Quit anyway?",
+        "log.install.start": "—— {title} ——",
+        "log.install.fail": "Install failed: {err}",
+        "log.dl.start": "—— Download started ——",
+        "log.dl.format": "Format: {fmt}",
+        "log.dl.dir": "Save to: {dir}",
+        "log.dl.done": "Done: {summary}",
+        "log.dl.cancelled": "Download cancelled.",
+        "log.dl.error": "Error: {err}",
+        "log.dl.summary_ok": "{n} link(s) OK",
+        "log.dl.summary_fail": "{n} failed",
+        "log.dl.summary_skip": "{n} duplicate(s) skipped",
+        "log.cancel": "Cancelling…",
+        "status.cancelled": "Cancelled",
+        "sep.list": ", ",
+    },
+    "ru": {
+        "app.title": "Загрузчик YouTube",
+        "app.subtitle": "Вставьте ссылки YouTube, выберите качество и скачайте",
+        "lang.label": "Язык:",
+        "url.card": "Ссылки (по одной в строке: видео / плейлист / канал)",
+        "url.paste": "Вставить из буфера",
+        "url.clear": "Очистить",
+        "url.resize_hint": "↕ Перетащите разделитель ниже, чтобы изменить высоту",
+        "options.card": "Параметры загрузки",
+        "options.quality": "Качество:",
+        "options.subtitles": "Скачать субтитры",
+        "options.save": "Сохранить в:",
+        "options.pick_folder": "Выбрать папку",
+        "options.open_folder": "Открыть папку",
+        "dir.unset": "(Нажмите «Выбрать папку»)",
+        "options.cookies": "Cookies:",
+        "options.cookies_pick": "Обзор",
+        "action.download": "Начать загрузку",
+        "action.cancel": "Отмена",
+        "status.ready": "Готово",
+        "status.preparing": "Подготовка…",
+        "status.cancelling": "Отмена…",
+        "status.installing": "{title}…",
+        "env.checking": "Проверка окружения…",
+        "env.summary": "Среда:  {y} yt-dlp ({y_ver})   {f} ffmpeg ({f_hint})   {n} Node.js ({n_hint})",
+        "env.not_installed": "не установлен",
+        "env.installed": "установлен",
+        "paths.show": "Показать пути установки",
+        "paths.hide": "Скрыть пути установки",
+        "paths.title": "Пути установки (можно изменить до установки):",
+        "paths.browse_ytdlp": "Папка yt-dlp",
+        "paths.browse_ffmpeg": "Папка ffmpeg",
+        "paths.browse_node": "Папка Node.js",
+        "paths.browse": "Обзор",
+        "log.show": "Показать журнал",
+        "log.hide": "Скрыть журнал",
+        "log.card": "Журнал",
+        "sources.footer": "Источники: {ytdlp}  ·  {ffmpeg}  ·  {nodejs}",
+        "format.best": "Лучшее качество",
+        "format.2160": "4K (2160p)",
+        "format.1440": "2K (1440p)",
+        "format.1080": "1080p",
+        "format.720": "720p",
+        "format.480": "480p",
+        "format.360": "360p",
+        "format.240": "240p",
+        "format.audio": "Только аудио (MP3)",
+        "msg.clipboard.title": "Буфер обмена",
+        "msg.clipboard.empty": "Буфер обмена пуст или недоступен.",
+        "msg.dir.pick_title": "Выберите папку загрузки",
+        "msg.dir.bad_title": "Путь сохранения",
+        "msg.dir.bad": "Нельзя использовать эту папку:\n{err}",
+        "msg.dir.ok_title": "Путь сохранения",
+        "msg.dir.ok": "Выбрана папка:\n{path}",
+        "msg.dir.open_fail": "Не удалось открыть папку:\n{path}\n\n{err}",
+        "msg.dir.need_pick": "Сначала выберите папку для загрузки.",
+        "msg.dir.mkdir_fail": "Не удалось создать или открыть папку:\n{path}\n\n{err}",
+        "msg.cookie.title": "Выберите cookies.txt",
+        "msg.wait.title": "Подождите",
+        "msg.wait.busy": "Выполняется другая задача. Повторите позже.",
+        "msg.missing.title": "Нет зависимостей",
+        "msg.missing.body": "Не установлено: {items}\n\nУстановить сейчас?\n(yt-dlp — GitHub/PyPI, ffmpeg — ffbinaries.com)",
+        "msg.node.title": "Установить Node.js",
+        "msg.node.body": "Node.js не найден.\n\nСкачать с {url}?",
+        "msg.node.download": "Node.js не найден.\nУстановить с {url}?\n(«Нет» — попробовать загрузку без него)",
+        "msg.install.done_title": "Установка завершена",
+        "msg.install.done": "{title} завершено.",
+        "msg.install.fail_title": "Ошибка установки",
+        "msg.install.fail": "{err}\n\nМожно запустить setup.bat вручную.",
+        "msg.ytdlp.ok": "yt-dlp установлен: {ver}",
+        "msg.ffmpeg.ok": "ffmpeg установлен: {hint}",
+        "msg.node.ok": "Node.js установлен.",
+        "msg.deps.ok_title": "Зависимости",
+        "msg.deps.ok": "yt-dlp, ffmpeg и Node.js готовы.",
+        "msg.install.all": "Установить всё",
+        "msg.install.ytdlp": "Установить yt-dlp ({url})",
+        "msg.install.ffmpeg": "Установить ffmpeg ({url})",
+        "msg.install.node": "Установить Node.js ({url})",
+        "msg.url.title": "Ссылки",
+        "msg.url.empty": "Введите хотя бы одну ссылку YouTube.",
+        "msg.missing.dl": "Нужны yt-dlp и ffmpeg.\nУстановить сейчас?",
+        "msg.cookie.missing": "Указанный cookies.txt не найден.",
+        "msg.done.title": "Загрузка завершена",
+        "msg.fail.title": "Ошибка загрузки",
+        "msg.quit.title": "Выход",
+        "msg.quit.body": "Идёт загрузка. Выйти всё равно?",
+        "log.install.start": "—— {title} ——",
+        "log.install.fail": "Ошибка установки: {err}",
+        "log.dl.start": "—— Начало загрузки ——",
+        "log.dl.format": "Формат: {fmt}",
+        "log.dl.dir": "Папка: {dir}",
+        "log.dl.done": "Готово: {summary}",
+        "log.dl.cancelled": "Загрузка отменена.",
+        "log.dl.error": "Ошибка: {err}",
+        "log.dl.summary_ok": "успешно: {n}",
+        "log.dl.summary_fail": "ошибок: {n}",
+        "log.dl.summary_skip": "пропущено дубликатов: {n}",
+        "log.cancel": "Отмена…",
+        "status.cancelled": "Отменено",
+        "sep.list": ", ",
+    },
+    "uk": {
+        "app.title": "Завантажувач YouTube",
+        "app.subtitle": "Вставте посилання YouTube, оберіть якість і завантажте",
+        "lang.label": "Мова:",
+        "url.card": "Посилання (по одному в рядку: відео / плейлист / канал)",
+        "url.paste": "Вставити з буфера",
+        "url.clear": "Очистити",
+        "url.resize_hint": "↕ Перетягніть роздільник нижче, щоб змінити висоту",
+        "options.card": "Параметри завантаження",
+        "options.quality": "Якість:",
+        "options.subtitles": "Завантажити субтитри",
+        "options.save": "Зберегти в:",
+        "options.pick_folder": "Обрати теку",
+        "options.open_folder": "Відкрити теку",
+        "dir.unset": "(Натисніть «Обрати теку»)",
+        "options.cookies": "Cookies:",
+        "options.cookies_pick": "Огляд",
+        "action.download": "Почати завантаження",
+        "action.cancel": "Скасувати",
+        "status.ready": "Готово",
+        "status.preparing": "Підготовка…",
+        "status.cancelling": "Скасування…",
+        "status.installing": "{title}…",
+        "env.checking": "Перевірка середовища…",
+        "env.summary": "Середовище:  {y} yt-dlp ({y_ver})   {f} ffmpeg ({f_hint})   {n} Node.js ({n_hint})",
+        "env.not_installed": "не встановлено",
+        "env.installed": "встановлено",
+        "paths.show": "Показати шляхи встановлення",
+        "paths.hide": "Приховати шляхи встановлення",
+        "paths.title": "Шляхи встановлення (можна змінити до встановлення):",
+        "paths.browse_ytdlp": "Тека yt-dlp",
+        "paths.browse_ffmpeg": "Тека ffmpeg",
+        "paths.browse_node": "Тека Node.js",
+        "paths.browse": "Огляд",
+        "log.show": "Показати журнал",
+        "log.hide": "Приховати журнал",
+        "log.card": "Журнал",
+        "sources.footer": "Джерела: {ytdlp}  ·  {ffmpeg}  ·  {nodejs}",
+        "format.best": "Найкраща якість",
+        "format.2160": "4K (2160p)",
+        "format.1440": "2K (1440p)",
+        "format.1080": "1080p",
+        "format.720": "720p",
+        "format.480": "480p",
+        "format.360": "360p",
+        "format.240": "240p",
+        "format.audio": "Лише аудіо (MP3)",
+        "msg.clipboard.title": "Буфер обміну",
+        "msg.clipboard.empty": "Буфер обміну порожній або недоступний.",
+        "msg.dir.pick_title": "Оберіть теку завантаження",
+        "msg.dir.bad_title": "Шлях збереження",
+        "msg.dir.bad": "Неможливо використати цю теку:\n{err}",
+        "msg.dir.ok_title": "Шлях збереження",
+        "msg.dir.ok": "Обрано теку:\n{path}",
+        "msg.dir.open_fail": "Не вдалося відкрити теку:\n{path}\n\n{err}",
+        "msg.dir.need_pick": "Спочатку оберіть теку для завантаження.",
+        "msg.dir.mkdir_fail": "Не вдалося створити або відкрити теку:\n{path}\n\n{err}",
+        "msg.cookie.title": "Оберіть cookies.txt",
+        "msg.wait.title": "Зачекайте",
+        "msg.wait.busy": "Виконується інше завдання. Спробуйте пізніше.",
+        "msg.missing.title": "Немає залежностей",
+        "msg.missing.body": "Не встановлено: {items}\n\nВстановити зараз?\n(yt-dlp — GitHub/PyPI, ffmpeg — ffbinaries.com)",
+        "msg.node.title": "Встановити Node.js",
+        "msg.node.body": "Node.js не знайдено.\n\nЗавантажити з {url}?",
+        "msg.node.download": "Node.js не знайдено.\nВстановити з {url}?\n(«Ні» — спробувати завантаження без нього)",
+        "msg.install.done_title": "Встановлення завершено",
+        "msg.install.done": "{title} завершено.",
+        "msg.install.fail_title": "Помилка встановлення",
+        "msg.install.fail": "{err}\n\nМожна запустити setup.bat вручну.",
+        "msg.ytdlp.ok": "yt-dlp встановлено: {ver}",
+        "msg.ffmpeg.ok": "ffmpeg встановлено: {hint}",
+        "msg.node.ok": "Node.js встановлено.",
+        "msg.deps.ok_title": "Залежності",
+        "msg.deps.ok": "yt-dlp, ffmpeg і Node.js готові.",
+        "msg.install.all": "Встановити все",
+        "msg.install.ytdlp": "Встановити yt-dlp ({url})",
+        "msg.install.ffmpeg": "Встановити ffmpeg ({url})",
+        "msg.install.node": "Встановити Node.js ({url})",
+        "msg.url.title": "Посилання",
+        "msg.url.empty": "Введіть хоча б одне посилання YouTube.",
+        "msg.missing.dl": "Потрібні yt-dlp і ffmpeg.\nВстановити зараз?",
+        "msg.cookie.missing": "Вказаний cookies.txt не знайдено.",
+        "msg.done.title": "Завантаження завершено",
+        "msg.fail.title": "Помилка завантаження",
+        "msg.quit.title": "Вихід",
+        "msg.quit.body": "Триває завантаження. Вийти все одно?",
+        "log.install.start": "—— {title} ——",
+        "log.install.fail": "Помилка встановлення: {err}",
+        "log.dl.start": "—— Початок завантаження ——",
+        "log.dl.format": "Формат: {fmt}",
+        "log.dl.dir": "Тека: {dir}",
+        "log.dl.done": "Готово: {summary}",
+        "log.dl.cancelled": "Завантаження скасовано.",
+        "log.dl.error": "Помилка: {err}",
+        "log.dl.summary_ok": "успішно: {n}",
+        "log.dl.summary_fail": "помилок: {n}",
+        "log.dl.summary_skip": "пропущено дублікатів: {n}",
+        "log.cancel": "Скасування…",
+        "status.cancelled": "Скасовано",
+        "sep.list": ", ",
+    },
+}
+
+
+def detect_system_language() -> str:
+    """Map OS locale to zh / en / ru / uk (default en)."""
+    candidates: list[str] = []
+    for getter in (
+        lambda: locale.getlocale()[0],
+        lambda: locale.getdefaultlocale()[0],
+    ):
+        try:
+            value = getter()
+            if value:
+                candidates.append(value)
+        except Exception:
+            pass
+    candidates.append(os.environ.get("LANG", ""))
+    candidates.append(os.environ.get("LANGUAGE", ""))
+
+    for raw in candidates:
+        code = (raw or "").lower().replace("_", "-")
+        if code.startswith("zh"):
+            return "zh"
+        if code.startswith("uk") or code.startswith("ua"):
+            return "uk"
+        if code.startswith("ru"):
+            return "ru"
+        if code.startswith("en"):
+            return "en"
+    return "en"
+
+
+def init_language(code: Optional[str] = None) -> str:
+    global _CURRENT
+    if code and code in LANGUAGES:
+        _CURRENT = code
+    else:
+        _CURRENT = detect_system_language()
+    return _CURRENT
+
+
+def get_language() -> str:
+    return _CURRENT
+
+
+def set_language(code: str) -> None:
+    if code not in LANGUAGES:
+        raise ValueError(f"Unsupported language: {code}")
+    global _CURRENT
+    _CURRENT = code
+
+
+def t(key: str, **kwargs: Any) -> str:
+    table = _MESSAGES.get(_CURRENT) or _MESSAGES["en"]
+    text = table.get(key) or _MESSAGES["en"].get(key, key)
+    if kwargs:
+        return text.format(**kwargs)
+    return text
+
+
+def format_label_for_key(format_key: str) -> str:
+    return t(f"format.{format_key}", default=format_key)
+
+
+def format_option_labels() -> list[str]:
+    return [format_label_for_key(key) for key in FORMAT_KEYS]
+
+
+def resolve_format_key(saved: str) -> str:
+    if saved in FORMAT_KEYS:
+        return saved
+    for lang in LANGUAGES:
+        table = _MESSAGES[lang]
+        for key in FORMAT_KEYS:
+            if saved == table.get(f"format.{key}"):
+                return key
+    return "best"
+
+
+def language_code_from_label(label: str) -> Optional[str]:
+    for code, name in LANG_LABELS.items():
+        if label == name:
+            return code
+    return None
+
+
+def ui_font_family() -> str:
+    if _CURRENT == "zh":
+        return "Microsoft YaHei UI"
+    return "Segoe UI"

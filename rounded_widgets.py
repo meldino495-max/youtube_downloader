@@ -293,18 +293,25 @@ class RoundedCard(tk.Frame):
         self.content = tk.Frame(self, bg=C["surface"])
         self.content.place(x=padding, y=padding, relwidth=1, width=-padding * 2)
 
+        self._title_label: tk.Label | None = None
         if title:
-            tk.Label(
+            self._title_label = tk.Label(
                 self.content,
                 text=title,
                 bg=C["surface"],
                 fg=C["text"],
                 font=FONT_BOLD,
                 anchor="w",
-            ).pack(anchor="w", pady=(0, 6))
+            )
+            self._title_label.pack(anchor="w", pady=(0, 6))
 
         self.content.bind("<Configure>", self._sync_shape, add="+")
         self.bind("<Configure>", self._sync_shape, add="+")
+
+    def set_title(self, text: str) -> None:
+        self._title = text
+        if self._title_label is not None:
+            self._title_label.configure(text=text)
 
     def _sync_shape(self, _event: Optional[tk.Event] = None) -> None:
         self.update_idletasks()

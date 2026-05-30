@@ -22,6 +22,19 @@ from engine import (
     format_label,
     inspect_environment,
 )
+from i18n import (
+    FORMAT_KEYS,
+    LANG_LABELS,
+    LANGUAGES,
+    format_option_labels,
+    get_language,
+    init_language,
+    language_code_from_label,
+    resolve_format_key,
+    set_language,
+    t,
+    ui_font_family,
+)
 from ui_styles import (
     C,
     accent_button,
@@ -45,49 +58,29 @@ from paths_config import (
     ytdlp_is_ready,
 )
 
-FORMAT_OPTIONS = [
-    ("best", "最佳质量"),
-    ("2160", "4K (2160p)"),
-    ("1440", "2K (1440p)"),
-    ("1080", "1080p"),
-    ("720", "720p"),
-    ("480", "480p"),
-    ("360", "360p"),
-    ("240", "240p"),
-    ("audio", "仅音频 MP3"),
-]
-
-
 URL_TEXT_LINES = 3
 
 
 def _default_url_pane_height(master: tk.Misc) -> int:
     """Pane height that fits the link card with three text lines."""
-    font = tkfont.Font(master=master, font=("Microsoft YaHei UI", 10))
+    font = tkfont.Font(master=master, font=(ui_font_family(), 10))
     text_h = font.metrics("linespace") * URL_TEXT_LINES + 28
     return int(36 + text_h + 108)
-
-
-def _resolve_format_key(saved: str) -> str:
-    keys = [key for key, _ in FORMAT_OPTIONS]
-    if saved in keys:
-        return saved
-    for key, label in FORMAT_OPTIONS:
-        if saved == label:
-            return key
-    return "best"
 
 
 class YouTubeDownloaderApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("YouTube 下载器")
         self.minsize(820, 700)
         self.geometry("900x860")
 
         apply_theme(self)
         apply_window_icon(self)
         self._config = self._load_config()
+        saved_lang = self._config.get("language", "")
+        init_language(saved_lang if saved_lang in LANGUAGES else None)
+        self.title(t("app.title"))
+        self._dir_is_placeholder = False
         self._install_paths = InstallPaths.from_config(self._config)
         self._env = inspect_environment(
             Path(self._config.get("download_dir", "")) or None,
@@ -118,7 +111,7 @@ class YouTubeDownloaderApp(tk.Tk):
     def _save_config(self) -> None:
         paths = self._current_install_paths()
         saved_dir = self.dir_var.get().strip()
-        if saved_dir.startswith("（"):
+        if self._dir_is_placeholder:
             saved_dir = ""
         data = {
             "download_dir": saved_dir or str(self._env.download_dir),
@@ -128,6 +121,7 @@ class YouTubeDownloaderApp(tk.Tk):
             "install_paths": paths.to_config_dict(),
             "show_log": self._show_log.get(),
             "show_install_paths": self._show_install_paths.get(),
+            "language": get_language(),
         }
         pane_height = self._url_pane_height()
         if pane_height is not None:
@@ -164,6 +158,67 @@ class YouTubeDownloaderApp(tk.Tk):
         self._apply_log_visibility()
         self._save_config()
 
+    def _on_language_changed(self, _event: Optional[object] = None) -> None:
+        code = language_code_from_label(self.lang_var.get())
+        if not code or code == get_language():
+            return
+        set_language(code)
+        self._apply_language()
+        self._save_config()
+
+    def _apply_language(self) -> None:
+        self.title(t("app.title"))
+        self._header_title.configure(text=t("app.title"))
+        self._header_subtitle.configure(text=t("app.subtitle"))
+        self._lang_label.configure(text=t("lang.label"))
+        self._url_card.set_title(t("url.card"))
+        self._paste_btn.configure(text=t("url.paste"))
+        self._clear_btn.configure(text=t("url.clear"))
+        self._url_resize_lbl.configure(text=t("url.resize_hint"))
+        self._options_card.set_title(t("options.card"))
+        self._quality_lbl.configure(text=t("options.quality"))
+        self._subtitles_chk.configure(text=t("options.subtitles"))
+        self._save_lbl.configure(text=t("options.save"))
+        self._pick_folder_btn.configure(text=t("options.pick_folder"))
+        self._open_folder_btn.configure(text=t("options.open_folder"))
+        self._cookies_lbl.configure(text=t("options.cookies"))
+        self._cookies_pick_btn.configure(text=t("options.cookies_pick"))
+        self.download_btn.configure(text=t("action.download"))
+        self.cancel_btn.configure(text=t("action.cancel"))
+        if self.status_var.get() in (
+            t("status.ready"),
+            "就绪",
+            "Ready",
+            "Готово",
+        ):
+            self.status_var.set(t("status.ready"))
+        self._paths_title_lbl.configure(text=t("paths.title"))
+        for btn, title_key in self._path_browse_btns:
+            btn.configure(text=t("paths.browse"))
+        self._sources_lbl.configure(
+            text=t(
+                "sources.footer",
+                ytdlp=SOURCE_URLS["yt-dlp"],
+                ffmpeg=SOURCE_URLS["ffmpeg"],
+                nodejs=SOURCE_URLS["node.js"],
+            )
+        )
+        self.log_frame.set_title(t("log.card"))
+        self.install_all_btn.configure(text=t("msg.install.all"))
+        self._apply_install_paths_visibility()
+        self._apply_log_visibility()
+        key = self._format_key()
+        labels = format_option_labels()
+        self.format_combo.configure(values=labels)
+        idx = FORMAT_KEYS.index(key) if key in FORMAT_KEYS else 0
+        self.format_var.set(labels[idx])
+        self.format_combo.current(idx)
+        if self._dir_is_placeholder:
+            self.dir_var.set(t("dir.unset"))
+        self.dir_label.configure(font=(ui_font_family(), 9))
+        self._env_summary.configure(font=(ui_font_family(), 9))
+        self._refresh_environment()
+
     def _apply_install_paths_visibility(self) -> None:
         if self._show_install_paths.get():
             self.paths_content.pack(
@@ -172,18 +227,18 @@ class YouTubeDownloaderApp(tk.Tk):
                 pady=(0, 2),
                 before=self.env_btns,
             )
-            self._paths_toggle_btn.configure(text="隐藏安装位置")
+            self._paths_toggle_btn.configure(text=t("paths.hide"))
         else:
             self.paths_content.pack_forget()
-            self._paths_toggle_btn.configure(text="显示安装位置")
+            self._paths_toggle_btn.configure(text=t("paths.show"))
 
     def _apply_log_visibility(self) -> None:
         if self._show_log.get():
             self.log_frame.pack(fill="both", expand=True, padx=12, pady=(0, 4))
-            self._log_toggle_btn.configure(text="隐藏日志")
+            self._log_toggle_btn.configure(text=t("log.hide"))
         else:
             self.log_frame.pack_forget()
-            self._log_toggle_btn.configure(text="显示日志")
+            self._log_toggle_btn.configure(text=t("log.show"))
 
     def _build_ui(self) -> None:
         pad_x = {"padx": 12}
@@ -192,14 +247,33 @@ class YouTubeDownloaderApp(tk.Tk):
         outer = ttk.Frame(self, padding=(12, 8))
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="YouTube 下载器", style="Header.TLabel").pack(
-            anchor="w", **pad_x
+        self._header_title = ttk.Label(
+            outer, text=t("app.title"), style="Header.TLabel"
         )
-        ttk.Label(
+        self._header_title.pack(anchor="w", **pad_x)
+        self._header_subtitle = ttk.Label(
             outer,
-            text="粘贴 YouTube 链接，选择格式，一键下载",
+            text=t("app.subtitle"),
             style="Muted.TLabel",
-        ).pack(anchor="w", padx=12, pady=(0, 4))
+        )
+        self._header_subtitle.pack(anchor="w", padx=12, pady=(0, 4))
+
+        lang_row = ttk.Frame(outer)
+        lang_row.pack(fill="x", padx=12, pady=(0, 6))
+        self._lang_label = ttk.Label(lang_row, text=t("lang.label"), style="Card.TLabel")
+        self._lang_label.pack(side="left")
+        lang_names = [LANG_LABELS[code] for code in LANGUAGES]
+        self.lang_var = tk.StringVar(value=LANG_LABELS[get_language()])
+        self.lang_combo = ttk.Combobox(
+            lang_row,
+            textvariable=self.lang_var,
+            values=lang_names,
+            state="readonly",
+            width=14,
+            style="Flat.TCombobox",
+        )
+        self.lang_combo.pack(side="left", padx=8)
+        self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_changed)
 
         self._url_pane = tk.PanedWindow(
             outer,
@@ -219,43 +293,46 @@ class YouTubeDownloaderApp(tk.Tk):
         self._url_pane.add(url_section, minsize=default_url_h - 24)
         self._url_pane.add(bottom_section, minsize=300)
 
-        url_frame = card_frame(
+        self._url_card = card_frame(
             url_section,
-            text="视频链接（每行一个，支持单个视频 / 播放列表 / 频道）",
+            text=t("url.card"),
             padding=6,
             expand_vertical=True,
         )
-        url_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
+        self._url_card.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
 
-        url_btns = ttk.Frame(url_frame.content, style="Card.TFrame")
+        url_btns = ttk.Frame(self._url_card.content, style="Card.TFrame")
         url_btns.pack(fill="x", padx=4, pady=(0, 4))
-        ghost_button(url_btns, "从剪贴板粘贴", self._paste_clipboard).pack(side="left")
-        ghost_button(
+        self._paste_btn = ghost_button(url_btns, t("url.paste"), self._paste_clipboard)
+        self._paste_btn.pack(side="left")
+        self._clear_btn = ghost_button(
             url_btns,
-            "清空",
+            t("url.clear"),
             lambda: self.url_text.delete("1.0", "end"),
-        ).pack(side="left", padx=8)
+        )
+        self._clear_btn.pack(side="left", padx=8)
 
-        url_body = tk.Frame(url_frame.content, bg=C["surface"])
+        url_body = tk.Frame(self._url_card.content, bg=C["surface"])
         url_body.pack(fill=tk.BOTH, expand=True, padx=4, pady=(0, 2))
         self.url_text = styled_text(url_body, height=URL_TEXT_LINES, expand=True)
 
-        ttk.Label(
+        self._url_resize_lbl = ttk.Label(
             url_section,
-            text="↕ 拖动下方分隔条可调整链接区域高度",
+            text=t("url.resize_hint"),
             style="Muted.TLabel",
-        ).pack(anchor="w", padx=14, pady=(0, 2))
+        )
+        self._url_resize_lbl.pack(anchor="w", padx=14, pady=(0, 2))
 
-        options = card_frame(bottom_section, text="下载选项", padding=8)
-        options.pack(fill="x", **section)
+        self._options_card = card_frame(bottom_section, text=t("options.card"), padding=8)
+        self._options_card.pack(fill="x", **section)
 
-        row1 = ttk.Frame(options.content, style="Card.TFrame")
+        row1 = ttk.Frame(self._options_card.content, style="Card.TFrame")
         row1.pack(fill="x", pady=2)
-        ttk.Label(row1, text="画质:", style="Card.TLabel").pack(side="left")
-        saved_key = _resolve_format_key(self._config.get("format", "best"))
-        labels = [label for _, label in FORMAT_OPTIONS]
-        keys = [key for key, _ in FORMAT_OPTIONS]
-        self.format_var = tk.StringVar(value=labels[keys.index(saved_key)])
+        self._quality_lbl = ttk.Label(row1, text=t("options.quality"), style="Card.TLabel")
+        self._quality_lbl.pack(side="left")
+        saved_key = resolve_format_key(self._config.get("format", "best"))
+        labels = format_option_labels()
+        self.format_var = tk.StringVar(value=labels[FORMAT_KEYS.index(saved_key)])
         self.format_combo = ttk.Combobox(
             row1,
             textvariable=self.format_var,
@@ -265,27 +342,33 @@ class YouTubeDownloaderApp(tk.Tk):
             style="Flat.TCombobox",
         )
         self.format_combo.pack(side="left", padx=8)
-        self.format_combo.current(keys.index(saved_key))
+        self.format_combo.current(FORMAT_KEYS.index(saved_key))
 
         self.subtitles_var = tk.BooleanVar(value=bool(self._config.get("subtitles", False)))
-        ttk.Checkbutton(
+        self._subtitles_chk = ttk.Checkbutton(
             row1,
-            text="下载字幕",
+            text=t("options.subtitles"),
             variable=self.subtitles_var,
             style="Card.TCheckbutton",
-        ).pack(side="left", padx=10)
+        )
+        self._subtitles_chk.pack(side="left", padx=10)
 
-        row2 = ttk.Frame(options.content, style="Card.TFrame")
+        row2 = ttk.Frame(self._options_card.content, style="Card.TFrame")
         row2.pack(fill="x", pady=2)
-        ttk.Label(row2, text="保存到:", style="Card.TLabel").pack(side="left")
+        self._save_lbl = ttk.Label(row2, text=t("options.save"), style="Card.TLabel")
+        self._save_lbl.pack(side="left")
         saved_dir = self._config.get("download_dir", "").strip()
         self.dir_var = tk.StringVar(value=saved_dir or str(self._env.download_dir))
-        folder_picker_button(
-            row2, "选择文件夹", self._choose_dir
-        ).pack(side="left", padx=(4, 6))
-        ghost_button(row2, "打开文件夹", self._open_download_dir).pack(side="left")
+        self._pick_folder_btn = folder_picker_button(
+            row2, t("options.pick_folder"), self._choose_dir
+        )
+        self._pick_folder_btn.pack(side="left", padx=(4, 6))
+        self._open_folder_btn = ghost_button(
+            row2, t("options.open_folder"), self._open_download_dir
+        )
+        self._open_folder_btn.pack(side="left")
 
-        row2_path = ttk.Frame(options.content, style="Card.TFrame")
+        row2_path = ttk.Frame(self._options_card.content, style="Card.TFrame")
         row2_path.pack(fill="x", pady=(0, 2))
         self.dir_label = tk.Label(
             row2_path,
@@ -294,28 +377,31 @@ class YouTubeDownloaderApp(tk.Tk):
             justify="left",
             bg=C["surface"],
             fg=C["text_secondary"],
-            font=("Microsoft YaHei UI", 9),
+            font=(ui_font_family(), 9),
             wraplength=820,
         )
         self.dir_label.pack(fill="x", padx=4)
         if not self.dir_var.get().strip():
-            self.dir_var.set("（请点击「选择文件夹」）")
+            self._dir_is_placeholder = True
+            self.dir_var.set(t("dir.unset"))
 
-        row3 = ttk.Frame(options.content, style="Card.TFrame")
+        row3 = ttk.Frame(self._options_card.content, style="Card.TFrame")
         row3.pack(fill="x", pady=2)
-        ttk.Label(row3, text="Cookies:", style="Card.TLabel").pack(side="left")
+        self._cookies_lbl = ttk.Label(row3, text=t("options.cookies"), style="Card.TLabel")
+        self._cookies_lbl.pack(side="left")
         self.cookie_var = tk.StringVar(value=self._config.get("cookie_file", ""))
         cookie_field = rounded_entry(row3, self.cookie_var)
         cookie_field.pack(side="left", fill="x", expand=True, padx=8)
-        ghost_button(row3, "选择", self._choose_cookie).pack(side="left")
+        self._cookies_pick_btn = ghost_button(row3, t("options.cookies_pick"), self._choose_cookie)
+        self._cookies_pick_btn.pack(side="left")
 
         action = ttk.Frame(bottom_section)
         action.pack(fill="x", padx=12, pady=(6, 2))
 
-        self.download_btn = primary_button(action, "开始下载", self._start_download)
+        self.download_btn = primary_button(action, t("action.download"), self._start_download)
         self.download_btn.pack(side="left")
 
-        self.cancel_btn = danger_ghost_button(action, "取消", self._cancel_download)
+        self.cancel_btn = danger_ghost_button(action, t("action.cancel"), self._cancel_download)
         self.cancel_btn.configure(state="disabled")
         self.cancel_btn.pack(side="left", padx=10)
 
@@ -327,7 +413,7 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self.progress.pack(side="left", fill="x", expand=True, padx=10)
 
-        self.status_var = tk.StringVar(value="就绪")
+        self.status_var = tk.StringVar(value=t("status.ready"))
         ttk.Label(action, textvariable=self.status_var, width=10).pack(side="right")
 
         env_row = ttk.Frame(bottom_section)
@@ -335,11 +421,11 @@ class YouTubeDownloaderApp(tk.Tk):
 
         self._env_summary = tk.Label(
             env_row,
-            text="环境检测中…",
+            text=t("env.checking"),
             anchor="w",
             bg=C["bg"],
             fg=C["text_secondary"],
-            font=("Microsoft YaHei UI", 9),
+            font=(ui_font_family(), 9),
         )
         self._env_summary.pack(fill="x")
 
@@ -347,37 +433,41 @@ class YouTubeDownloaderApp(tk.Tk):
         paths_header.pack(fill="x", padx=12, pady=(2, 0))
         self._paths_toggle_btn = ghost_button(
             paths_header,
-            "显示安装位置",
+            t("paths.show"),
             self._toggle_install_paths,
         )
         self._paths_toggle_btn.pack(anchor="w")
 
         self.paths_content = ttk.Frame(bottom_section)
-        ttk.Label(
+        self._paths_title_lbl = ttk.Label(
             self.paths_content,
-            text="安装位置（安装前可自定义）:",
+            text=t("paths.title"),
             style="Muted.TLabel",
-        ).pack(anchor="w")
+        )
+        self._paths_title_lbl.pack(anchor="w")
 
         self.ytdlp_dir_var = tk.StringVar(value=str(self._install_paths.ytdlp_dir))
         self.ffmpeg_dir_var = tk.StringVar(value=str(self._install_paths.ffmpeg_dir))
         self.nodejs_dir_var = tk.StringVar(value=str(self._install_paths.nodejs_dir))
 
-        for label, var, title in (
-            ("yt-dlp", self.ytdlp_dir_var, "选择 yt-dlp 安装文件夹"),
-            ("ffmpeg", self.ffmpeg_dir_var, "选择 ffmpeg 安装文件夹"),
-            ("Node.js", self.nodejs_dir_var, "选择 Node.js 安装文件夹"),
+        self._path_browse_btns: list[tuple[object, str]] = []
+        for label, var, title_key in (
+            ("yt-dlp", self.ytdlp_dir_var, "paths.browse_ytdlp"),
+            ("ffmpeg", self.ffmpeg_dir_var, "paths.browse_ffmpeg"),
+            ("Node.js", self.nodejs_dir_var, "paths.browse_node"),
         ):
             row = ttk.Frame(self.paths_content)
             row.pack(fill="x", pady=1)
             ttk.Label(row, text=f"{label}:", width=8).pack(side="left")
             field = rounded_entry(row, var)
             field.pack(side="left", fill="x", expand=True, padx=(0, 6))
-            ghost_button(
+            browse_btn = ghost_button(
                 row,
-                "浏览",
-                lambda v=var, t=title: self._browse_install_dir(v, t),
-            ).pack(side="left")
+                t("paths.browse"),
+                lambda v=var, k=title_key: self._browse_install_dir(v, t(k)),
+            )
+            browse_btn.pack(side="left")
+            self._path_browse_btns.append((browse_btn, title_key))
 
         env_btns = ttk.Frame(bottom_section)
         env_btns.pack(fill="x", padx=12, pady=(2, 0))
@@ -396,41 +486,44 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self.install_node_btn.pack(side="left", padx=(0, 4))
         self.install_all_btn = accent_button(
-            env_btns, "全部安装", self._install_all
+            env_btns, t("msg.install.all"), self._install_all
         )
         self.install_all_btn.pack(side="left", padx=(0, 4))
         compact_button(env_btns, "↻", self._refresh_environment).pack(side="left")
 
-        tk.Label(
+        self._sources_lbl = tk.Label(
             bottom_section,
-            text=(
-                f"下载源: {SOURCE_URLS['yt-dlp']}  ·  "
-                f"{SOURCE_URLS['ffmpeg']}  ·  {SOURCE_URLS['node.js']}"
+            text=t(
+                "sources.footer",
+                ytdlp=SOURCE_URLS["yt-dlp"],
+                ffmpeg=SOURCE_URLS["ffmpeg"],
+                nodejs=SOURCE_URLS["node.js"],
             ),
             anchor="w",
             bg=C["bg"],
             fg=C["text_secondary"],
-            font=("Microsoft YaHei UI", 8),
+            font=(ui_font_family(), 8),
             wraplength=860,
             justify="left",
-        ).pack(fill="x", padx=12, pady=(2, 4))
+        )
+        self._sources_lbl.pack(fill="x", padx=12, pady=(2, 4))
 
         log_header = ttk.Frame(bottom_section)
         log_header.pack(fill="x", padx=12, pady=(0, 2))
         self._log_toggle_btn = ghost_button(
             log_header,
-            "隐藏日志",
+            t("log.hide"),
             self._toggle_log,
         )
         self._log_toggle_btn.pack(anchor="w")
 
         self.log_frame = card_frame(
-            bottom_section, text="日志", padding=8, expand_vertical=True
+            bottom_section, text=t("log.card"), padding=8, expand_vertical=True
         )
         self.log_text = styled_text(
             self.log_frame.content,
             height=18,
-            font=("Microsoft YaHei UI", 10),
+            font=(ui_font_family(), 10),
             state="disabled",
             expand=True,
         )
@@ -467,25 +560,33 @@ class YouTubeDownloaderApp(tk.Tk):
         y = "✓" if self._env.yt_dlp_ready else "✗"
         f = "✓" if self._env.ffmpeg_available else "✗"
         n = "✓" if self._env.js_runtime_ready else "✗"
-        y_ver = self._env.yt_dlp_version if self._env.yt_dlp_ready else "未安装"
-        f_hint = self._env.ffmpeg_source if self._env.ffmpeg_available else "未安装"
-        n_hint = "已安装" if self._env.js_runtime_ready else "未安装"
-        return (
-            f"环境:  {y} yt-dlp ({y_ver})   "
-            f"{f} ffmpeg ({f_hint})   "
-            f"{n} Node.js ({n_hint})"
+        not_inst = t("env.not_installed")
+        installed = t("env.installed")
+        y_ver = self._env.yt_dlp_version if self._env.yt_dlp_ready else not_inst
+        f_hint = self._env.ffmpeg_source if self._env.ffmpeg_available else not_inst
+        n_hint = installed if self._env.js_runtime_ready else not_inst
+        return t(
+            "env.summary",
+            y=y,
+            y_ver=y_ver,
+            f=f,
+            f_hint=f_hint,
+            n=n,
+            n_hint=n_hint,
         )
 
     def _format_key(self) -> str:
         label = self.format_var.get()
-        for key, item_label in FORMAT_OPTIONS:
-            if item_label == label:
+        for key in FORMAT_KEYS:
+            if label == t(f"format.{key}"):
                 return key
         return "best"
 
     def _download_dir_from_ui(self) -> Optional[Path]:
+        if self._dir_is_placeholder:
+            return None
         raw = self.dir_var.get().strip()
-        if not raw or raw.startswith("（"):
+        if not raw:
             return None
         try:
             return Path(raw)
@@ -513,6 +614,7 @@ class YouTubeDownloaderApp(tk.Tk):
             self.focus_force()
 
     def _set_download_dir(self, folder: str) -> None:
+        self._dir_is_placeholder = False
         self.dir_var.set(folder)
         self._save_config()
 
@@ -520,7 +622,8 @@ class YouTubeDownloaderApp(tk.Tk):
         download_dir = self._download_dir_from_ui()
         self._install_paths = self._current_install_paths()
         self._env = inspect_environment(download_dir, self._install_paths)
-        if not self.dir_var.get().strip() or self.dir_var.get().strip().startswith("（"):
+        if self._dir_is_placeholder or not self.dir_var.get().strip():
+            self._dir_is_placeholder = False
             self.dir_var.set(str(self._env.download_dir))
 
         self._env_summary.configure(text=self._compact_env_summary())
@@ -539,7 +642,10 @@ class YouTubeDownloaderApp(tk.Tk):
             state="normal" if not self._env.js_runtime_ready else "disabled"
         )
         need_any = bool(self._env.missing or self._env.optional)
-        self.install_all_btn.configure(state="normal" if need_any else "disabled")
+        self.install_all_btn.configure(
+            text=t("msg.install.all"),
+            state="normal" if need_any else "disabled",
+        )
 
     def _append_log(self, message: str) -> None:
         def write() -> None:
@@ -561,12 +667,12 @@ class YouTubeDownloaderApp(tk.Tk):
         try:
             text = self.clipboard_get()
         except tk.TclError:
-            messagebox.showwarning("剪贴板", "剪贴板为空或无法读取。")
+            messagebox.showwarning(t("msg.clipboard.title"), t("msg.clipboard.empty"))
             return
         self.url_text.insert("end", text.strip() + "\n")
 
     def _dialog_initial_dir(self, current: str) -> str:
-        if current.startswith("（"):
+        if self._dir_is_placeholder:
             current = ""
         try:
             path = Path(current) if current else self._env.download_dir
@@ -580,22 +686,22 @@ class YouTubeDownloaderApp(tk.Tk):
         return str(fallback if fallback.is_dir() else Path.home())
 
     def _choose_dir(self) -> None:
-        chosen = self._pick_folder("选择下载保存文件夹")
+        chosen = self._pick_folder(t("msg.dir.pick_title"))
         if not chosen:
             return
         try:
             Path(chosen).mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             messagebox.showwarning(
-                "保存路径",
-                f"无法使用该文件夹:\n{exc}",
+                t("msg.dir.bad_title"),
+                t("msg.dir.bad", err=exc),
                 parent=self,
             )
             return
         self._set_download_dir(chosen)
         messagebox.showinfo(
-            "保存路径",
-            f"已选择文件夹:\n{chosen}",
+            t("msg.dir.ok_title"),
+            t("msg.dir.ok", path=chosen),
             parent=self,
         )
 
@@ -605,8 +711,8 @@ class YouTubeDownloaderApp(tk.Tk):
             path.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             messagebox.showwarning(
-                "保存路径",
-                f"无法打开文件夹:\n{path}\n\n{exc}",
+                t("msg.dir.bad_title"),
+                t("msg.dir.open_fail", path=path, err=exc),
                 parent=self,
             )
             return
@@ -616,7 +722,7 @@ class YouTubeDownloaderApp(tk.Tk):
 
     def _choose_cookie(self) -> None:
         chosen = filedialog.askopenfilename(
-            title="选择 cookies.txt",
+            title=t("msg.cookie.title"),
             filetypes=[("Netscape cookies", "*.txt"), ("All files", "*.*")],
             parent=self,
         )
@@ -647,17 +753,16 @@ class YouTubeDownloaderApp(tk.Tk):
         if not missing and not optional:
             return
         if missing:
-            items = "、".join(missing)
+            items = t("sep.list").join(missing)
             if messagebox.askyesno(
-                "缺少依赖",
-                f"检测到未安装: {items}\n\n是否现在自动安装？\n"
-                "（yt-dlp 来自 GitHub/PyPI，ffmpeg 来自 ffbinaries.com）",
+                t("msg.missing.title"),
+                t("msg.missing.body", items=items),
             ):
                 self._install_all()
             return
         if optional and messagebox.askyesno(
-            "建议安装 Node.js",
-            f"未检测到 Node.js。\n\n是否从 {SOURCE_URLS['node.js']} 下载安装？",
+            t("msg.node.title"),
+            t("msg.node.body", url=SOURCE_URLS["node.js"]),
         ):
             self._install_component("node.js")
 
@@ -670,12 +775,12 @@ class YouTubeDownloaderApp(tk.Tk):
         title: str,
     ) -> None:
         if self._worker and self._worker.is_alive():
-            messagebox.showinfo("请稍候", "当前有任务正在进行，请稍后再安装。")
+            messagebox.showinfo(t("msg.wait.title"), t("msg.wait.busy"))
             return
 
         self._set_install_busy(True)
-        self._append_log(f"—— 开始{title} ——")
-        self.status_var.set(f"正在{title}…")
+        self._append_log(t("log.install.start", title=title))
+        self.status_var.set(t("status.installing", title=title))
         self.progress["value"] = 0
 
         def worker() -> None:
@@ -693,20 +798,23 @@ class YouTubeDownloaderApp(tk.Tk):
                 self.after(0, self._refresh_environment)
                 self.after(
                     0,
-                    lambda: messagebox.showinfo("安装完成", f"{title}完成。"),
+                    lambda: messagebox.showinfo(
+                        t("msg.install.done_title"),
+                        t("msg.install.done", title=title),
+                    ),
                 )
             except Exception as exc:
-                self._append_log(f"安装失败: {exc}")
+                self._append_log(t("log.install.fail", err=exc))
                 self.after(
                     0,
                     lambda: messagebox.showerror(
-                        "安装失败",
-                        f"{exc}\n\n也可手动运行 setup.bat。",
+                        t("msg.install.fail_title"),
+                        t("msg.install.fail", err=exc),
                     ),
                 )
             finally:
                 self.after(0, lambda: self._set_install_busy(False))
-                self.after(0, lambda: self.status_var.set("就绪"))
+                self.after(0, lambda: self.status_var.set(t("status.ready")))
 
         self._worker = threading.Thread(target=worker, daemon=True)
         self._worker.start()
@@ -719,35 +827,41 @@ class YouTubeDownloaderApp(tk.Tk):
         if name == "yt-dlp":
             if ytdlp_is_ready(paths):
                 self._refresh_environment()
-                messagebox.showinfo("yt-dlp", f"yt-dlp 已安装: {self._env.yt_dlp_version}")
+                messagebox.showinfo(
+                    "yt-dlp",
+                    t("msg.ytdlp.ok", ver=self._env.yt_dlp_version),
+                )
                 return
             self._run_install_worker(
                 install_ytdlp=True,
                 install_ffmpeg_tool=False,
                 install_node=False,
-                title=f"安装 yt-dlp（{SOURCE_URLS['yt-dlp']}）",
+                title=t("msg.install.ytdlp", url=SOURCE_URLS["yt-dlp"]),
             )
         elif name == "ffmpeg":
             if find_ffmpeg_exe(paths):
                 self._refresh_environment()
-                messagebox.showinfo("ffmpeg", f"ffmpeg 已安装: {self._env.ffmpeg_source}")
+                messagebox.showinfo(
+                    "ffmpeg",
+                    t("msg.ffmpeg.ok", hint=self._env.ffmpeg_source),
+                )
                 return
             self._run_install_worker(
                 install_ytdlp=False,
                 install_ffmpeg_tool=True,
                 install_node=False,
-                title=f"安装 ffmpeg（{SOURCE_URLS['ffmpeg']}）",
+                title=t("msg.install.ffmpeg", url=SOURCE_URLS["ffmpeg"]),
             )
         elif name == "node.js":
             if find_node_exe(paths):
                 self._refresh_environment()
-                messagebox.showinfo("Node.js", "Node.js 已安装。")
+                messagebox.showinfo("Node.js", t("msg.node.ok"))
                 return
             self._run_install_worker(
                 install_ytdlp=False,
                 install_ffmpeg_tool=False,
                 install_node=True,
-                title=f"安装 Node.js（{SOURCE_URLS['node.js']}）",
+                title=t("msg.install.node", url=SOURCE_URLS["node.js"]),
             )
 
     def _install_all(self) -> None:
@@ -755,13 +869,13 @@ class YouTubeDownloaderApp(tk.Tk):
         missing = missing_components(paths)
         optional = optional_components(paths)
         if not missing and not optional:
-            messagebox.showinfo("依赖", "yt-dlp、ffmpeg、Node.js 均已就绪。")
+            messagebox.showinfo(t("msg.deps.ok_title"), t("msg.deps.ok"))
             return
         self._run_install_worker(
             install_ytdlp="yt-dlp" in missing,
             install_ffmpeg_tool="ffmpeg" in missing,
             install_node=bool(optional),
-            title="安装全部组件",
+            title=t("msg.install.all"),
         )
 
     def _install_dependencies(self, include_node: bool = True) -> None:
@@ -773,29 +887,26 @@ class YouTubeDownloaderApp(tk.Tk):
 
         urls = extract_urls(self.url_text.get("1.0", "end"))
         if not urls:
-            messagebox.showwarning("链接", "请输入至少一个有效的 YouTube 链接。")
+            messagebox.showwarning(t("msg.url.title"), t("msg.url.empty"))
             return
 
         if missing_components(self._current_install_paths()):
-            if messagebox.askyesno(
-                "缺少依赖",
-                "下载前需要 yt-dlp 和 ffmpeg。\n是否现在自动安装？",
-            ):
+            if messagebox.askyesno(t("msg.missing.title"), t("msg.missing.dl")):
                 self._install_all()
             return
 
         if not self._env.js_runtime_ready and messagebox.askyesno(
-            "建议安装 Node.js",
-            f"未检测到 Node.js。\n是否从 {SOURCE_URLS['node.js']} 安装？\n（点「否」可继续尝试下载）",
+            t("msg.node.title"),
+            t("msg.node.download", url=SOURCE_URLS["node.js"]),
         ):
             self._install_component("node.js")
             return
 
-        output_dir = Path(self.dir_var.get().strip())
-        if not self.dir_var.get().strip() or self.dir_var.get().strip().startswith("（"):
+        output_dir = self._download_dir_from_ui()
+        if output_dir is None:
             messagebox.showwarning(
-                "保存路径",
-                "请先点击「选择文件夹」选择下载保存位置。",
+                t("msg.dir.bad_title"),
+                t("msg.dir.need_pick"),
                 parent=self,
             )
             return
@@ -803,8 +914,8 @@ class YouTubeDownloaderApp(tk.Tk):
             output_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             messagebox.showerror(
-                "保存路径",
-                f"无法创建或访问该文件夹:\n{output_dir}\n\n{exc}",
+                t("msg.dir.bad_title"),
+                t("msg.dir.mkdir_fail", path=output_dir, err=exc),
                 parent=self,
             )
             return
@@ -813,17 +924,17 @@ class YouTubeDownloaderApp(tk.Tk):
             Path(self.cookie_var.get().strip()) if self.cookie_var.get().strip() else None
         )
         if cookie_path and not cookie_path.is_file():
-            messagebox.showwarning("Cookies", "指定的 cookies.txt 不存在。")
+            messagebox.showwarning("Cookies", t("msg.cookie.missing"))
             return
 
         self._save_config()
         self._cancel_flag = False
         self._set_busy(True)
         self.progress["value"] = 0
-        self.status_var.set("准备下载…")
-        self._append_log("—— 开始下载 ——")
-        self._append_log(f"格式: {format_label(self._format_key())}")
-        self._append_log(f"保存目录: {output_dir}")
+        self.status_var.set(t("status.preparing"))
+        self._append_log(t("log.dl.start"))
+        self._append_log(t("log.dl.format", fmt=format_label(self._format_key())))
+        self._append_log(t("log.dl.dir", dir=output_dir))
 
         def worker() -> None:
             downloader = Downloader(
@@ -839,26 +950,26 @@ class YouTubeDownloaderApp(tk.Tk):
                     subtitles=self.subtitles_var.get(),
                     cookie_file=cookie_path,
                 )
-                parts = [f"成功 {success} 个链接"]
+                parts = [t("log.dl.summary_ok", n=success)]
                 if failed:
-                    parts.append(f"失败 {failed} 个")
+                    parts.append(t("log.dl.summary_fail", n=failed))
                 if skipped:
-                    parts.append(f"跳过 {skipped} 个重复视频")
-                summary = "完成：" + "，".join(parts)
-                self._append_log(summary)
+                    parts.append(t("log.dl.summary_skip", n=skipped))
+                summary = t("sep.list").join(parts)
+                self._append_log(t("log.dl.done", summary=summary))
                 self.after(
                     0,
                     lambda: messagebox.showinfo(
-                        "下载完成",
-                        summary + f"\n文件保存在:\n{output_dir}",
+                        t("msg.done.title"),
+                        summary + f"\n{output_dir}",
                     ),
                 )
             except DownloadCancelled:
-                self._append_log("已取消下载。")
-                self.after(0, lambda: self.status_var.set("已取消"))
+                self._append_log(t("log.dl.cancelled"))
+                self.after(0, lambda: self.status_var.set(t("status.cancelled")))
             except Exception as exc:
-                self._append_log(f"错误: {exc}")
-                self.after(0, lambda: messagebox.showerror("下载失败", str(exc)))
+                self._append_log(t("log.dl.error", err=exc))
+                self.after(0, lambda: messagebox.showerror(t("msg.fail.title"), str(exc)))
             finally:
                 self.after(0, lambda: self._set_busy(False))
 
@@ -867,13 +978,13 @@ class YouTubeDownloaderApp(tk.Tk):
 
     def _cancel_download(self) -> None:
         self._cancel_flag = True
-        self.status_var.set("正在取消…")
-        self._append_log("正在取消…")
+        self.status_var.set(t("status.cancelling"))
+        self._append_log(t("log.cancel"))
 
     def _on_close(self) -> None:
         self._save_config()
         if self._worker and self._worker.is_alive():
-            if messagebox.askyesno("退出", "下载仍在进行，确定要退出吗？"):
+            if messagebox.askyesno(t("msg.quit.title"), t("msg.quit.body")):
                 self._cancel_flag = True
                 self.destroy()
             return

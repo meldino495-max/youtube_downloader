@@ -233,18 +233,9 @@ def inspect_environment(
 
 
 def format_label(format_key: str) -> str:
-    labels = {
-        "best": "最佳质量",
-        "2160": "4K (2160p)",
-        "1440": "2K (1440p)",
-        "1080": "1080p",
-        "720": "720p",
-        "480": "480p",
-        "360": "360p",
-        "240": "240p",
-        "audio": "MP3 音频",
-    }
-    return labels.get(format_key, format_key)
+    from i18n import format_label_for_key
+
+    return format_label_for_key(format_key)
 
 
 def build_format_selector(format_key: str) -> str:
