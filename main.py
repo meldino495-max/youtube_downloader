@@ -62,6 +62,7 @@ from paths_config import (
 )
 from updater import (
     RELEASE_PAGE,
+    ReleaseInfo,
     apply_update_and_restart,
     can_self_update,
     check_for_update,
@@ -116,6 +117,7 @@ class YouTubeDownloaderApp(tk.Tk):
         self._refresh_environment()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(300, self._maybe_prompt_install)
+        self.after(1200, self._maybe_prompt_update)
 
     def _load_config(self) -> dict:
         if not CONFIG_PATH.is_file():
@@ -809,87 +811,84 @@ class YouTubeDownloaderApp(tk.Tk):
         self.download_btn.configure(state=state)
         self.lang_combo.configure(state="disabled" if busy else "readonly")
 
-    def _check_for_updates(self) -> None:
-        if self._worker and self._worker.is_alive():
-            messagebox.showinfo(t("msg.wait.title"), t("msg.wait.busy"), parent=self)
-            return
-        if not can_self_update():
-            messagebox.showinfo(
-                t("update.latest_title"),
-                t("update.dev_only", url=RELEASE_PAGE),
+    def _ask_update_confirm(self, release: ReleaseInfo, *, startup: bool) -> bool:
+        title_key = "update.startup_title" if startup else "update.confirm_title"
+        body_key = "update.startup_prompt" if startup else "update.confirm"
+        done = Event()
+        choice = {"ok": False}
+
+        def ask() -> None:
+            self._append_log(t("log.update.found", tag=release.tag))
+            choice["ok"] = messagebox.askyesno(
+                t(title_key),
+                t(
+                    body_key,
+                    latest=release.tag,
+                    current=f"v{current_version_label()}",
+                ),
                 parent=self,
             )
-            return
+            done.set()
 
-        self._set_update_busy(True)
-        self._append_log(t("log.update.check"))
-        self.status_var.set(t("update.checking"))
+        self.after(0, ask)
+        done.wait(timeout=300)
+        return choice["ok"]
 
+    def _download_and_apply_update(self, release: ReleaseInfo) -> None:
+        dest = default_update_download_path()
+
+        def on_progress(pct: float, _tag: str) -> None:
+            self.after(
+                0,
+                lambda p=pct: self._set_status(p, t("update.downloading")),
+            )
+
+        download_release(release, dest, on_progress)
+
+        restart_done = Event()
+
+        def on_ready() -> None:
+            self._append_log(t("log.update.done"))
+            messagebox.showinfo(
+                t("update.confirm_title"),
+                t("update.restart"),
+                parent=self,
+            )
+            restart_done.set()
+
+        self.after(0, on_ready)
+        restart_done.wait(timeout=120)
+        apply_update_and_restart(dest)
+        self.after(0, self.destroy)
+
+    def _run_update_worker(self, *, interactive: bool) -> None:
         def worker() -> None:
             try:
                 has_update, release, _current = check_for_update()
                 if not has_update:
-                    done = Event()
+                    if interactive:
+                        done = Event()
 
-                    def on_latest() -> None:
-                        messagebox.showinfo(
-                            t("update.latest_title"),
-                            t("update.latest", version=release.tag.lstrip("vV")),
-                            parent=self,
-                        )
-                        self._append_log(t("log.update.none"))
-                        done.set()
+                        def on_latest() -> None:
+                            messagebox.showinfo(
+                                t("update.latest_title"),
+                                t(
+                                    "update.latest",
+                                    version=release.tag.lstrip("vV"),
+                                ),
+                                parent=self,
+                            )
+                            self._append_log(t("log.update.none"))
+                            done.set()
 
-                    self.after(0, on_latest)
-                    done.wait(timeout=120)
+                        self.after(0, on_latest)
+                        done.wait(timeout=120)
                     return
 
-                done = Event()
-                choice = {"ok": False}
-
-                def on_found() -> None:
-                    self._append_log(t("log.update.found", tag=release.tag))
-                    choice["ok"] = messagebox.askyesno(
-                        t("update.confirm_title"),
-                        t(
-                            "update.confirm",
-                            latest=release.tag,
-                            current=f"v{current_version_label()}",
-                        ),
-                        parent=self,
-                    )
-                    done.set()
-
-                self.after(0, on_found)
-                done.wait(timeout=300)
-                if not choice["ok"]:
+                if not self._ask_update_confirm(release, startup=not interactive):
                     return
 
-                dest = default_update_download_path()
-
-                def on_progress(pct: float, _tag: str) -> None:
-                    self.after(
-                        0,
-                        lambda p=pct: self._set_status(p, t("update.downloading")),
-                    )
-
-                download_release(release, dest, on_progress)
-
-                restart_done = Event()
-
-                def on_ready() -> None:
-                    self._append_log(t("log.update.done"))
-                    messagebox.showinfo(
-                        t("update.confirm_title"),
-                        t("update.restart"),
-                        parent=self,
-                    )
-                    restart_done.set()
-
-                self.after(0, on_ready)
-                restart_done.wait(timeout=120)
-                apply_update_and_restart(dest)
-                self.after(0, self.destroy)
+                self._download_and_apply_update(release)
             except Exception as exc:
                 err = str(exc)
 
@@ -912,6 +911,75 @@ class YouTubeDownloaderApp(tk.Tk):
 
         self._worker = threading.Thread(target=worker, daemon=True)
         self._worker.start()
+
+    def _check_for_updates(self) -> None:
+        if self._worker and self._worker.is_alive():
+            messagebox.showinfo(t("msg.wait.title"), t("msg.wait.busy"), parent=self)
+            return
+        if not can_self_update():
+            messagebox.showinfo(
+                t("update.latest_title"),
+                t("update.dev_only", url=RELEASE_PAGE),
+                parent=self,
+            )
+            return
+
+        self._set_update_busy(True)
+        self._append_log(t("log.update.check"))
+        self.status_var.set(t("update.checking"))
+        self._run_update_worker(interactive=True)
+
+    def _start_confirmed_update(self, release: ReleaseInfo) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+        self._set_update_busy(True)
+        self.status_var.set(t("update.downloading"))
+
+        def worker() -> None:
+            try:
+                self._download_and_apply_update(release)
+            except Exception as exc:
+                err = str(exc)
+
+                def on_error() -> None:
+                    self._append_log(t("log.install.fail", err=err))
+                    messagebox.showerror(
+                        t("update.fail_title"),
+                        t("update.download_fail", err=err),
+                        parent=self,
+                    )
+
+                self.after(0, on_error)
+            finally:
+
+                def on_finish() -> None:
+                    self._set_update_busy(False)
+                    self.status_var.set(t("status.ready"))
+
+                self.after(0, on_finish)
+
+        self._worker = threading.Thread(target=worker, daemon=True)
+        self._worker.start()
+
+    def _maybe_prompt_update(self) -> None:
+        if not can_self_update():
+            return
+        if self._worker and self._worker.is_alive():
+            self.after(2000, self._maybe_prompt_update)
+            return
+
+        def worker() -> None:
+            try:
+                has_update, release, _current = check_for_update()
+                if not has_update:
+                    return
+                if not self._ask_update_confirm(release, startup=True):
+                    return
+                self.after(0, lambda: self._start_confirmed_update(release))
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _maybe_prompt_install(self) -> None:
         paths = self._current_install_paths()
