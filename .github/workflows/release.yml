@@ -28,6 +28,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pillow
 
+      - name: Prepare application icon
+        shell: pwsh
+        run: python scripts/build_icon.py
+
       - name: Build executable
         shell: pwsh
         run: |
