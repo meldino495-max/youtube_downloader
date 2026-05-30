@@ -40,6 +40,8 @@ jobs:
             --icon "assets/icon.ico" `
             --add-data "assets;assets" `
             --hidden-import=yt_dlp `
+            --hidden-import=updater `
+            --hidden-import=version `
             --collect-submodules yt_dlp `
             main.py
           New-Item -ItemType Directory -Force -Path dist_final | Out-Null

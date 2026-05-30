@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import tkinter as tk
+from threading import Event
 import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -57,6 +58,16 @@ from paths_config import (
     save_install_paths,
     ytdlp_is_ready,
 )
+from updater import (
+    RELEASE_PAGE,
+    apply_update_and_restart,
+    can_self_update,
+    check_for_update,
+    current_version_label,
+    default_update_download_path,
+    download_release,
+)
+from version import __version__
 
 URL_TEXT_LINES = 3
 
@@ -171,6 +182,8 @@ class YouTubeDownloaderApp(tk.Tk):
         self._header_title.configure(text=t("app.title"))
         self._header_subtitle.configure(text=t("app.subtitle"))
         self._lang_label.configure(text=t("lang.label"))
+        self._update_btn.configure(text=t("update.check"))
+        self._version_lbl.configure(text=t("update.current", version=__version__))
         self._url_card.set_title(t("url.card"))
         self._paste_btn.configure(text=t("url.paste"))
         self._clear_btn.configure(text=t("url.clear"))
@@ -274,6 +287,17 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self.lang_combo.pack(side="left", padx=8)
         self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_changed)
+        ttk.Frame(lang_row).pack(side="left", fill="x", expand=True)
+        self._update_btn = ghost_button(
+            lang_row, t("update.check"), self._check_for_updates
+        )
+        self._update_btn.pack(side="right")
+        self._version_lbl = ttk.Label(
+            lang_row,
+            text=t("update.current", version=__version__),
+            style="Muted.TLabel",
+        )
+        self._version_lbl.pack(side="right", padx=(0, 8))
 
         self._url_pane = tk.PanedWindow(
             outer,
@@ -745,6 +769,116 @@ class YouTubeDownloaderApp(tk.Tk):
             btn.configure(state=state)
         if not busy:
             self._refresh_environment()
+
+    def _set_update_busy(self, busy: bool) -> None:
+        state = "disabled" if busy else "normal"
+        self._update_btn.configure(state=state)
+        self.download_btn.configure(state=state)
+        self.lang_combo.configure(state="disabled" if busy else "readonly")
+
+    def _check_for_updates(self) -> None:
+        if self._worker and self._worker.is_alive():
+            messagebox.showinfo(t("msg.wait.title"), t("msg.wait.busy"), parent=self)
+            return
+        if not can_self_update():
+            messagebox.showinfo(
+                t("update.latest_title"),
+                t("update.dev_only", url=RELEASE_PAGE),
+                parent=self,
+            )
+            return
+
+        self._set_update_busy(True)
+        self._append_log(t("log.update.check"))
+        self.status_var.set(t("update.checking"))
+
+        def worker() -> None:
+            try:
+                has_update, release, _current = check_for_update()
+                if not has_update:
+                    done = Event()
+
+                    def on_latest() -> None:
+                        messagebox.showinfo(
+                            t("update.latest_title"),
+                            t("update.latest", version=release.tag.lstrip("vV")),
+                            parent=self,
+                        )
+                        self._append_log(t("log.update.none"))
+                        done.set()
+
+                    self.after(0, on_latest)
+                    done.wait(timeout=120)
+                    return
+
+                done = Event()
+                choice = {"ok": False}
+
+                def on_found() -> None:
+                    self._append_log(t("log.update.found", tag=release.tag))
+                    choice["ok"] = messagebox.askyesno(
+                        t("update.confirm_title"),
+                        t(
+                            "update.confirm",
+                            latest=release.tag,
+                            current=f"v{current_version_label()}",
+                        ),
+                        parent=self,
+                    )
+                    done.set()
+
+                self.after(0, on_found)
+                done.wait(timeout=300)
+                if not choice["ok"]:
+                    return
+
+                dest = default_update_download_path()
+
+                def on_progress(pct: float, _tag: str) -> None:
+                    self.after(
+                        0,
+                        lambda p=pct: self._set_status(p, t("update.downloading")),
+                    )
+
+                download_release(release, dest, on_progress)
+
+                restart_done = Event()
+
+                def on_ready() -> None:
+                    self._append_log(t("log.update.done"))
+                    messagebox.showinfo(
+                        t("update.confirm_title"),
+                        t("update.restart"),
+                        parent=self,
+                    )
+                    restart_done.set()
+
+                self.after(0, on_ready)
+                restart_done.wait(timeout=120)
+                apply_update_and_restart(dest)
+                self.after(0, self.destroy)
+            except Exception as exc:
+                err = str(exc)
+
+                def on_error() -> None:
+                    self._append_log(t("log.install.fail", err=err))
+                    messagebox.showerror(
+                        t("update.fail_title"),
+                        t("update.download_fail", err=err),
+                        parent=self,
+                    )
+
+                self.after(0, on_error)
+            finally:
+
+                def on_finish() -> None:
+                    self._set_update_busy(False)
+                    self.status_var.set(t("status.ready"))
+
+                self.after(0, on_finish)
+
+        self._worker = threading.Thread(target=worker, daemon=True)
+        self._worker.start()
 
     def _maybe_prompt_install(self) -> None:
         paths = self._current_install_paths()
