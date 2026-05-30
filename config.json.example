@@ -1,0 +1,13 @@
+{
+  "download_dir": "",
+  "format": "best",
+  "subtitles": false,
+  "cookie_file": "",
+  "install_paths": {
+    "ytdlp": "tools/ytdlp",
+    "ffmpeg": "tools/ffmpeg",
+    "nodejs": "tools/nodejs"
+  },
+  "show_log": true,
+  "show_install_paths": false
+}

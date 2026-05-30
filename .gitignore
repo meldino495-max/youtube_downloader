@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec
+
+# Virtual environment
+.venv/
+venv/
+
+# Local user config (may contain personal paths)
+config.json
+
+# Downloaded tools (installed at runtime)
+tools/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# PyInstaller / CI artifacts
+dist_final/
+artifacts/
