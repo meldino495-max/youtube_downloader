@@ -76,11 +76,12 @@ class InstallPaths:
     def from_config(cls, config: Optional[dict] = None) -> InstallPaths:
         cfg = config if config is not None else load_config()
         raw = cfg.get("install_paths") or {}
-        return cls(
+        paths = cls(
             ytdlp_dir=_resolve_dir(raw.get("ytdlp"), DEFAULT_YTDLP_DIR),
             ffmpeg_dir=_resolve_dir(raw.get("ffmpeg"), DEFAULT_FFMPEG_DIR),
             nodejs_dir=_resolve_dir(raw.get("nodejs"), DEFAULT_NODEJS_DIR),
         )
+        return normalize_install_targets(paths)
 
     def to_config_dict(self) -> dict[str, str]:
         return {
@@ -156,6 +157,59 @@ def find_ffmpeg_exe(paths: Optional[InstallPaths] = None) -> Optional[Path]:
     if system:
         return system
     return None
+
+
+def normalize_install_targets(paths: InstallPaths) -> InstallPaths:
+    """Use app-local tools/ dirs as install targets when saved paths have no binaries."""
+    defaults = InstallPaths.defaults()
+
+    ytdlp_dir = paths.ytdlp_dir
+    if not (ytdlp_dir / "yt-dlp.exe").is_file():
+        ytdlp_dir = defaults.ytdlp_dir
+
+    ffmpeg_dir = paths.ffmpeg_dir
+    if not (ffmpeg_dir / "ffmpeg.exe").is_file():
+        ffmpeg_dir = defaults.ffmpeg_dir
+
+    nodejs_dir = paths.nodejs_dir
+    if not (nodejs_dir / "node.exe").is_file():
+        nodejs_dir = defaults.nodejs_dir
+
+    return InstallPaths(
+        ytdlp_dir=ytdlp_dir,
+        ffmpeg_dir=ffmpeg_dir,
+        nodejs_dir=nodejs_dir,
+    )
+
+
+def detected_install_paths(paths: Optional[InstallPaths] = None) -> InstallPaths:
+    """Return folders where components are actually found (for UI display)."""
+    base = paths or InstallPaths.from_config()
+    defaults = InstallPaths.defaults()
+
+    ytdlp_dir = base.ytdlp_dir
+    if (ytdlp_dir / "yt-dlp.exe").is_file():
+        pass
+    else:
+        which = _find_on_path("yt-dlp")
+        if which:
+            ytdlp_dir = Path(which).parent
+        elif ytdlp_is_ready(base):
+            ytdlp_dir = base.ytdlp_dir
+        else:
+            ytdlp_dir = defaults.ytdlp_dir
+
+    ffmpeg_exe = find_ffmpeg_exe(base)
+    ffmpeg_dir = ffmpeg_exe.parent if ffmpeg_exe else defaults.ffmpeg_dir
+
+    node_exe = find_node_exe(base)
+    nodejs_dir = node_exe.parent if node_exe else defaults.nodejs_dir
+
+    return InstallPaths(
+        ytdlp_dir=ytdlp_dir,
+        ffmpeg_dir=ffmpeg_dir,
+        nodejs_dir=nodejs_dir,
+    )
 
 
 def find_node_exe(paths: Optional[InstallPaths] = None) -> Optional[Path]:

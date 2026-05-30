@@ -53,8 +53,10 @@ from paths_config import (
     APP_DIR,
     CONFIG_PATH,
     InstallPaths,
+    detected_install_paths,
     find_ffmpeg_exe,
     find_node_exe,
+    normalize_install_targets,
     save_install_paths,
     ytdlp_is_ready,
 )
@@ -93,6 +95,10 @@ class YouTubeDownloaderApp(tk.Tk):
         self.title(t("app.title"))
         self._dir_is_placeholder = False
         self._install_paths = InstallPaths.from_config(self._config)
+        normalized = normalize_install_targets(self._install_paths)
+        if normalized != self._install_paths:
+            self._install_paths = normalized
+            save_install_paths(normalized)
         self._env = inspect_environment(
             Path(self._config.get("download_dir", "")) or None,
             self._install_paths,
@@ -144,20 +150,44 @@ class YouTubeDownloaderApp(tk.Tk):
         self._install_paths = paths
 
     def _current_install_paths(self) -> InstallPaths:
-        return InstallPaths(
-            ytdlp_dir=Path(self.ytdlp_dir_var.get().strip()),
-            ffmpeg_dir=Path(self.ffmpeg_dir_var.get().strip()),
-            nodejs_dir=Path(self.nodejs_dir_var.get().strip()),
-        )
+        """Install targets used by the installer (not only UI display paths)."""
+        return self._install_paths
 
-    def _browse_install_dir(self, var: tk.StringVar, title: str) -> None:
+    def _sync_detected_path_display(self) -> None:
+        display = detected_install_paths(self._install_paths)
+        self.ytdlp_dir_var.set(str(display.ytdlp_dir))
+        self.ffmpeg_dir_var.set(str(display.ffmpeg_dir))
+        self.nodejs_dir_var.set(str(display.nodejs_dir))
+
+    def _browse_install_dir(
+        self, var: tk.StringVar, title: str, component: str
+    ) -> None:
         initial = var.get().strip() or str(APP_DIR)
         chosen = self._pick_folder(title, initial)
-        if chosen:
-            var.set(chosen)
-            self._install_paths = self._current_install_paths()
-            save_install_paths(self._install_paths)
-            self._refresh_environment()
+        if not chosen:
+            return
+        chosen_path = Path(chosen)
+        var.set(chosen)
+        if component == "ytdlp":
+            self._install_paths = InstallPaths(
+                chosen_path,
+                self._install_paths.ffmpeg_dir,
+                self._install_paths.nodejs_dir,
+            )
+        elif component == "ffmpeg":
+            self._install_paths = InstallPaths(
+                self._install_paths.ytdlp_dir,
+                chosen_path,
+                self._install_paths.nodejs_dir,
+            )
+        else:
+            self._install_paths = InstallPaths(
+                self._install_paths.ytdlp_dir,
+                self._install_paths.ffmpeg_dir,
+                chosen_path,
+            )
+        save_install_paths(self._install_paths)
+        self._refresh_environment()
 
     def _toggle_install_paths(self) -> None:
         self._show_install_paths.set(not self._show_install_paths.get())
@@ -470,15 +500,16 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self._paths_title_lbl.pack(anchor="w")
 
-        self.ytdlp_dir_var = tk.StringVar(value=str(self._install_paths.ytdlp_dir))
-        self.ffmpeg_dir_var = tk.StringVar(value=str(self._install_paths.ffmpeg_dir))
-        self.nodejs_dir_var = tk.StringVar(value=str(self._install_paths.nodejs_dir))
+        display_paths = detected_install_paths(self._install_paths)
+        self.ytdlp_dir_var = tk.StringVar(value=str(display_paths.ytdlp_dir))
+        self.ffmpeg_dir_var = tk.StringVar(value=str(display_paths.ffmpeg_dir))
+        self.nodejs_dir_var = tk.StringVar(value=str(display_paths.nodejs_dir))
 
         self._path_browse_btns: list[tuple[object, str]] = []
-        for label, var, title_key in (
-            ("yt-dlp", self.ytdlp_dir_var, "paths.browse_ytdlp"),
-            ("ffmpeg", self.ffmpeg_dir_var, "paths.browse_ffmpeg"),
-            ("Node.js", self.nodejs_dir_var, "paths.browse_node"),
+        for label, var, title_key, component in (
+            ("yt-dlp", self.ytdlp_dir_var, "paths.browse_ytdlp", "ytdlp"),
+            ("ffmpeg", self.ffmpeg_dir_var, "paths.browse_ffmpeg", "ffmpeg"),
+            ("Node.js", self.nodejs_dir_var, "paths.browse_node", "nodejs"),
         ):
             row = ttk.Frame(self.paths_content)
             row.pack(fill="x", pady=1)
@@ -488,7 +519,9 @@ class YouTubeDownloaderApp(tk.Tk):
             browse_btn = ghost_button(
                 row,
                 t("paths.browse"),
-                lambda v=var, k=title_key: self._browse_install_dir(v, t(k)),
+                lambda v=var, k=title_key, c=component: self._browse_install_dir(
+                    v, t(k), c
+                ),
             )
             browse_btn.pack(side="left")
             self._path_browse_btns.append((browse_btn, title_key))
@@ -644,8 +677,8 @@ class YouTubeDownloaderApp(tk.Tk):
 
     def _refresh_environment(self) -> None:
         download_dir = self._download_dir_from_ui()
-        self._install_paths = self._current_install_paths()
         self._env = inspect_environment(download_dir, self._install_paths)
+        self._sync_detected_path_display()
         if self._dir_is_placeholder or not self.dir_var.get().strip():
             self._dir_is_placeholder = False
             self.dir_var.set(str(self._env.download_dir))
