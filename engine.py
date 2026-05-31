@@ -20,6 +20,7 @@ from paths_config import (
     InstallPaths,
     ensure_ytdlp_on_path,
     find_ffmpeg_exe,
+    find_ffprobe_exe,
     find_node_exe,
     ytdlp_is_ready,
 )
@@ -103,22 +104,28 @@ def detect_js_runtimes(paths: Optional[InstallPaths] = None) -> list[str]:
 
 
 def detect_js_runtime_source(paths: Optional[InstallPaths] = None) -> tuple[bool, str]:
+    from i18n import t
+
     install_paths = paths or InstallPaths.from_config()
     custom = install_paths.nodejs_dir / "node.exe"
     if custom.is_file():
-        return True, f"Node.js: {custom}"
+        return True, t("env.node_custom", path=custom)
     system = find_node_exe(install_paths)
     if system and system != custom:
-        return True, f"Node.js（系统 PATH）: {system}"
+        return True, t("env.node_system", path=system)
     for name in ("deno", "bun"):
         path = shutil.which(name)
         if path:
-            return True, f"{name}: {path}"
-    return False, "未安装"
+            return True, t("env.runtime_path", name=name, path=path)
+    return False, t("env.not_installed")
 
 
 def find_ffmpeg_executable(paths: Optional[InstallPaths] = None) -> Optional[Path]:
     return find_ffmpeg_exe(paths)
+
+
+def find_ffprobe_executable(paths: Optional[InstallPaths] = None) -> Optional[Path]:
+    return find_ffprobe_exe(paths)
 
 
 def get_ffmpeg_location() -> Optional[str]:
@@ -133,14 +140,16 @@ def detect_ffmpeg() -> bool:
 
 
 def detect_ffmpeg_source(paths: Optional[InstallPaths] = None) -> tuple[bool, Optional[str], str]:
+    from i18n import t
+
     install_paths = paths or InstallPaths.from_config()
     custom = install_paths.ffmpeg_dir / "ffmpeg.exe"
     if custom.is_file():
         return True, str(custom), str(install_paths.ffmpeg_dir)
     system = shutil.which("ffmpeg")
     if system:
-        return True, system, "系统 PATH"
-    return False, None, "未安装"
+        return True, system, t("env.system_path")
+    return False, None, t("env.not_installed")
 
 
 def detect_yt_dlp_version(paths: Optional[InstallPaths] = None) -> tuple[str, bool]:
@@ -178,7 +187,9 @@ def detect_yt_dlp_version(paths: Optional[InstallPaths] = None) -> tuple[str, bo
             return (result.stdout or result.stderr or "未知").strip(), False
         except Exception:
             pass
-    return "未安装", False
+    from i18n import t
+
+    return t("env.not_installed"), False
 
 
 def inspect_environment(
@@ -195,7 +206,12 @@ def inspect_environment(
 
     ensure_ytdlp_on_path(install_paths)
     yt_ready = ytdlp_is_ready(install_paths)
-    yt_version, _ = detect_yt_dlp_version(install_paths) if yt_ready else ("未安装", False)
+    if yt_ready:
+        yt_version, _ = detect_yt_dlp_version(install_paths)
+    else:
+        from i18n import t
+
+        yt_version = t("env.not_installed")
 
     ffmpeg_exe = find_ffmpeg_executable(install_paths)
     ffmpeg_ok = ffmpeg_exe is not None
@@ -205,8 +221,11 @@ def inspect_environment(
 
     js_ready, js_source = detect_js_runtime_source(install_paths)
     if not js_ready and find_node_executable(install_paths):
+        from i18n import t
+
         js_ready = True
-        js_source = f"Node.js: {find_node_executable(install_paths)}"
+        node = find_node_executable(install_paths)
+        js_source = t("env.node_system", path=node) if node else t("env.installed")
 
     missing: list[str] = []
     if not yt_ready:
@@ -489,16 +508,26 @@ class _YtdlpLogger:
     def __init__(self, log: ProgressCallback) -> None:
         self._log = log
 
+    def _emit(self, message: str, *, prefix: str = "") -> None:
+        text = message.rstrip("\r")
+        if not text:
+            return
+        for line in text.splitlines():
+            line = line.strip("\r")
+            if not line:
+                continue
+            self._log(f"{prefix}{line}" if prefix else line)
+
     def debug(self, message: str) -> None:
         if message.startswith("[debug] "):
             return
-        self._log(message)
+        self._emit(message)
 
     def info(self, message: str) -> None:
-        self._log(message)
+        self._emit(message)
 
     def warning(self, message: str) -> None:
-        self._log(f"警告: {message}")
+        self._emit(message, prefix="警告: ")
 
     def error(self, message: str) -> None:
-        self._log(f"错误: {message}")
+        self._emit(message, prefix="错误: ")

@@ -1,6 +1,8 @@
 {
   "language": "",
   "download_dir": "",
+  "clip_dir": "",
+  "clip_cache_dir": "",
   "format": "best",
   "subtitles": false,
   "cookie_file": "",

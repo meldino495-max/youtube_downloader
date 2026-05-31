@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import queue
+import shutil
 import threading
 import tkinter as tk
 from threading import Event
@@ -16,6 +18,8 @@ from deps_installer import (
     missing_components,
     optional_components,
 )
+from clip_engine import ClipRunner, ClipUrlJob
+from clip_page import ClipPage
 from engine import (
     DownloadCancelled,
     Downloader,
@@ -73,6 +77,7 @@ from updater import (
 from version import __version__
 
 URL_TEXT_LINES = 3
+PROGRESS_HEIGHT = 10
 
 
 def _default_url_pane_height(master: tk.Misc) -> int:
@@ -95,6 +100,8 @@ class YouTubeDownloaderApp(tk.Tk):
         init_language(saved_lang if saved_lang in LANGUAGES else None)
         self.title(t("app.title"))
         self._dir_is_placeholder = False
+        self._clip_dir_is_placeholder = False
+        self._clip_cache_dir_is_placeholder = False
         self._install_paths = InstallPaths.from_config(self._config)
         normalized = normalize_install_targets(self._install_paths)
         if normalized != self._install_paths:
@@ -106,15 +113,16 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self._worker: threading.Thread | None = None
         self._cancel_flag = False
-        self._show_log = tk.BooleanVar(
-            value=bool(self._config.get("show_log", True))
-        )
+        self._log_queue: queue.Queue[str] = queue.Queue()
+        self._pending_status: Optional[tuple[float, str]] = None
+        self._status_lock = threading.Lock()
         self._show_install_paths = tk.BooleanVar(
             value=bool(self._config.get("show_install_paths", False))
         )
 
         self._build_ui()
         self._refresh_environment()
+        self.after(50, self._poll_ui_queues)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(300, self._maybe_prompt_install)
         self.after(1200, self._maybe_prompt_update)
@@ -132,13 +140,20 @@ class YouTubeDownloaderApp(tk.Tk):
         saved_dir = self.dir_var.get().strip()
         if self._dir_is_placeholder:
             saved_dir = ""
+        clip_dir = self.clip_dir_var.get().strip()
+        if self._clip_dir_is_placeholder:
+            clip_dir = ""
+        clip_cache_dir = self.clip_cache_dir_var.get().strip()
+        if self._clip_cache_dir_is_placeholder:
+            clip_cache_dir = ""
         data = {
             "download_dir": saved_dir or str(self._env.download_dir),
+            "clip_dir": clip_dir or str(self._default_clip_dir()),
+            "clip_cache_dir": clip_cache_dir or str(self._default_clip_cache_dir()),
             "format": self._format_key(),
             "subtitles": self.subtitles_var.get(),
             "cookie_file": self.cookie_var.get().strip(),
             "install_paths": paths.to_config_dict(),
-            "show_log": self._show_log.get(),
             "show_install_paths": self._show_install_paths.get(),
             "language": get_language(),
         }
@@ -196,10 +211,9 @@ class YouTubeDownloaderApp(tk.Tk):
         self._apply_install_paths_visibility()
         self._save_config()
 
-    def _toggle_log(self) -> None:
-        self._show_log.set(not self._show_log.get())
-        self._apply_log_visibility()
-        self._save_config()
+    def _select_log_tab(self) -> None:
+        if hasattr(self, "_notebook"):
+            self._notebook.select(2)
 
     def _on_language_changed(self, _event: Optional[object] = None) -> None:
         code = language_code_from_label(self.lang_var.get())
@@ -251,7 +265,6 @@ class YouTubeDownloaderApp(tk.Tk):
         self.log_frame.set_title(t("log.card"))
         self.install_all_btn.configure(text=t("msg.install.all"))
         self._apply_install_paths_visibility()
-        self._apply_log_visibility()
         key = self._format_key()
         labels = format_option_labels()
         self.format_combo.configure(values=labels)
@@ -263,6 +276,25 @@ class YouTubeDownloaderApp(tk.Tk):
         self.dir_label.configure(font=(ui_font_family(), 9))
         self._env_summary.configure(font=(ui_font_family(), 9))
         self._refresh_environment()
+        if hasattr(self, "_notebook"):
+            self._notebook.tab(0, text=t("tab.download"))
+            self._notebook.tab(1, text=t("tab.clip"))
+            self._notebook.tab(2, text=t("tab.log"))
+        if hasattr(self, "_clip_page"):
+            self._clip_page.apply_language()
+        if hasattr(self, "_clip_save_lbl"):
+            self._clip_save_lbl.configure(text=t("clip.save"))
+            self._clip_pick_folder_btn.configure(text=t("clip.pick_folder"))
+            self._clip_open_folder_btn.configure(text=t("clip.open_folder"))
+        if hasattr(self, "_clip_cache_save_lbl"):
+            self._clip_cache_save_lbl.configure(text=t("clip.cache"))
+            self._clip_cache_pick_btn.configure(text=t("clip.pick_cache"))
+            self._clip_cache_open_btn.configure(text=t("clip.open_cache"))
+            self._clip_cache_clear_btn.configure(text=t("clip.clear_cache"))
+        if hasattr(self, "_clip_paths_card"):
+            self._clip_paths_card.set_title(t("clip.paths_card"))
+        if hasattr(self, "_clip_cache_hint_lbl"):
+            self._clip_cache_hint_lbl.configure(text=t("clip.cache_hint"))
 
     def _apply_install_paths_visibility(self) -> None:
         if self._show_install_paths.get():
@@ -276,14 +308,6 @@ class YouTubeDownloaderApp(tk.Tk):
         else:
             self.paths_content.pack_forget()
             self._paths_toggle_btn.configure(text=t("paths.show"))
-
-    def _apply_log_visibility(self) -> None:
-        if self._show_log.get():
-            self.log_frame.pack(fill="both", expand=True, padx=12, pady=(0, 4))
-            self._log_toggle_btn.configure(text=t("log.hide"))
-        else:
-            self.log_frame.pack_forget()
-            self._log_toggle_btn.configure(text=t("log.show"))
 
     def _build_ui(self) -> None:
         pad_x = {"padx": 12}
@@ -331,8 +355,18 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self._version_lbl.pack(side="right", padx=(0, 8))
 
+        self._notebook = ttk.Notebook(outer)
+        self._notebook.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+
+        download_tab = ttk.Frame(self._notebook)
+        clip_tab = ttk.Frame(self._notebook)
+        log_tab = ttk.Frame(self._notebook)
+        self._notebook.add(download_tab, text=t("tab.download"))
+        self._notebook.add(clip_tab, text=t("tab.clip"))
+        self._notebook.add(log_tab, text=t("tab.log"))
+
         self._url_pane = tk.PanedWindow(
-            outer,
+            download_tab,
             orient=tk.VERTICAL,
             sashrelief=tk.RAISED,
             sashwidth=7,
@@ -341,7 +375,7 @@ class YouTubeDownloaderApp(tk.Tk):
             bd=0,
             opaqueresize=True,
         )
-        self._url_pane.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+        self._url_pane.pack(fill=tk.BOTH, expand=True)
 
         url_section = tk.Frame(self._url_pane, bg=C["bg"])
         bottom_section = tk.Frame(self._url_pane, bg=C["bg"])
@@ -461,18 +495,79 @@ class YouTubeDownloaderApp(tk.Tk):
         self.cancel_btn.configure(state="disabled")
         self.cancel_btn.pack(side="left", padx=10)
 
-        self.progress = ttk.Progressbar(
-            action,
-            mode="determinate",
-            maximum=100,
-            style="Modern.Horizontal.TProgressbar",
+        saved_clip = self._config.get("clip_dir", "").strip()
+        if saved_clip:
+            self.clip_dir_var = tk.StringVar(value=saved_clip)
+        else:
+            default_clip = (self._download_dir_from_ui() or self._env.download_dir) / "Clips"
+            self.clip_dir_var = tk.StringVar(value=str(default_clip))
+
+        saved_cache = self._config.get("clip_cache_dir", "").strip()
+        if saved_cache:
+            self.clip_cache_dir_var = tk.StringVar(value=saved_cache)
+        else:
+            self.clip_cache_dir_var = tk.StringVar(
+                value=str(self._default_clip_cache_dir())
+            )
+
+        self._clip_page = ClipPage(clip_tab, self)
+        self._clip_page.pack(fill=tk.BOTH, expand=True)
+
+        self.log_frame = card_frame(
+            log_tab, text=t("log.card"), padding=8, expand_vertical=True
         )
-        self.progress.pack(side="left", fill="x", expand=True, padx=10)
+        self.log_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+        log_body = tk.Frame(self.log_frame.content, bg=C["surface"])
+        log_body.pack(fill=tk.BOTH, expand=True)
+        log_scroll = ttk.Scrollbar(log_body)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text = tk.Text(
+            log_body,
+            height=24,
+            wrap="word",
+            font=(ui_font_family(), 10),
+            state="disabled",
+            bg=C["surface_alt"],
+            fg=C["text"],
+            insertbackground=C["text"],
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            padx=8,
+            pady=6,
+            yscrollcommand=log_scroll.set,
+        )
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        log_scroll.config(command=self.log_text.yview)
 
+        progress_row = ttk.Frame(outer)
+        progress_row.pack(fill="x", padx=12, pady=(4, 2))
+        self._progress_pct = 0.0
+        self._progress_track = tk.Frame(
+            progress_row,
+            bg=C["border"],
+            height=PROGRESS_HEIGHT,
+            highlightthickness=0,
+        )
+        self._progress_track.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self._progress_track.pack_propagate(False)
+        self._progress_fill = tk.Frame(
+            self._progress_track,
+            bg=C["accent"],
+            height=PROGRESS_HEIGHT,
+            highlightthickness=0,
+        )
+        self._progress_track.bind(
+            "<Configure>",
+            lambda _event: self._set_progress_value(self._progress_pct),
+        )
         self.status_var = tk.StringVar(value=t("status.ready"))
-        ttk.Label(action, textvariable=self.status_var, width=10).pack(side="right")
+        ttk.Label(progress_row, textvariable=self.status_var).pack(side="right")
 
-        env_row = ttk.Frame(bottom_section)
+        shared_section = ttk.Frame(outer)
+        shared_section.pack(fill=tk.BOTH, expand=True)
+
+        env_row = ttk.Frame(shared_section)
         env_row.pack(fill="x", padx=12, pady=(0, 2))
 
         self._env_summary = tk.Label(
@@ -485,7 +580,7 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self._env_summary.pack(fill="x")
 
-        paths_header = ttk.Frame(bottom_section)
+        paths_header = ttk.Frame(shared_section)
         paths_header.pack(fill="x", padx=12, pady=(2, 0))
         self._paths_toggle_btn = ghost_button(
             paths_header,
@@ -494,7 +589,7 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self._paths_toggle_btn.pack(anchor="w")
 
-        self.paths_content = ttk.Frame(bottom_section)
+        self.paths_content = ttk.Frame(shared_section)
         self._paths_title_lbl = ttk.Label(
             self.paths_content,
             text=t("paths.title"),
@@ -528,7 +623,7 @@ class YouTubeDownloaderApp(tk.Tk):
             browse_btn.pack(side="left")
             self._path_browse_btns.append((browse_btn, title_key))
 
-        env_btns = ttk.Frame(bottom_section)
+        env_btns = ttk.Frame(shared_section)
         env_btns.pack(fill="x", padx=12, pady=(2, 0))
         self.env_btns = env_btns
 
@@ -551,7 +646,7 @@ class YouTubeDownloaderApp(tk.Tk):
         compact_button(env_btns, "↻", self._refresh_environment).pack(side="left")
 
         self._sources_lbl = tk.Label(
-            bottom_section,
+            shared_section,
             text=t(
                 "sources.footer",
                 ytdlp=SOURCE_URLS["yt-dlp"],
@@ -567,28 +662,7 @@ class YouTubeDownloaderApp(tk.Tk):
         )
         self._sources_lbl.pack(fill="x", padx=12, pady=(2, 4))
 
-        log_header = ttk.Frame(bottom_section)
-        log_header.pack(fill="x", padx=12, pady=(0, 2))
-        self._log_toggle_btn = ghost_button(
-            log_header,
-            t("log.hide"),
-            self._toggle_log,
-        )
-        self._log_toggle_btn.pack(anchor="w")
-
-        self.log_frame = card_frame(
-            bottom_section, text=t("log.card"), padding=8, expand_vertical=True
-        )
-        self.log_text = styled_text(
-            self.log_frame.content,
-            height=18,
-            font=(ui_font_family(), 10),
-            state="disabled",
-            expand=True,
-        )
-
         self._apply_install_paths_visibility()
-        self._apply_log_visibility()
         self.after_idle(self._restore_url_pane_height)
 
     def _restore_url_pane_height(self) -> None:
@@ -641,10 +715,41 @@ class YouTubeDownloaderApp(tk.Tk):
                 return key
         return "best"
 
+    def _default_clip_dir(self) -> Path:
+        download = self._download_dir_from_ui() or self._env.download_dir
+        return download / "Clips"
+
+    def _default_clip_cache_dir(self) -> Path:
+        import tempfile
+
+        return Path(tempfile.gettempdir()) / "YouTubeDownloader_clip_cache"
+
     def _download_dir_from_ui(self) -> Optional[Path]:
         if self._dir_is_placeholder:
             return None
         raw = self.dir_var.get().strip()
+        if not raw:
+            return None
+        try:
+            return Path(raw)
+        except Exception:
+            return None
+
+    def _clip_dir_from_ui(self) -> Optional[Path]:
+        if self._clip_dir_is_placeholder:
+            return None
+        raw = self.clip_dir_var.get().strip()
+        if not raw:
+            return None
+        try:
+            return Path(raw)
+        except Exception:
+            return None
+
+    def _clip_cache_dir_from_ui(self) -> Optional[Path]:
+        if self._clip_cache_dir_is_placeholder:
+            return None
+        raw = self.clip_cache_dir_var.get().strip()
         if not raw:
             return None
         try:
@@ -706,21 +811,103 @@ class YouTubeDownloaderApp(tk.Tk):
             state="normal" if need_any else "disabled",
         )
 
-    def _append_log(self, message: str) -> None:
-        def write() -> None:
-            self.log_text.configure(state="normal")
-            self.log_text.insert("end", message.rstrip() + "\n")
-            self.log_text.see("end")
-            self.log_text.configure(state="disabled")
+    def _set_progress_value(self, percent: float) -> None:
+        pct = max(0.0, min(100.0, float(percent)))
+        self._progress_pct = pct
+        try:
+            self._progress_track.update_idletasks()
+            width = self._progress_track.winfo_width()
+            if width <= 1:
+                return
+            fill_w = int(width * pct / 100.0)
+            if pct > 0 and fill_w < 2:
+                fill_w = 2
+            self._progress_fill.place(x=0, y=0, width=fill_w, relheight=1.0)
+        except tk.TclError:
+            pass
 
-        self.after(0, write)
+    def _poll_ui_queues(self) -> None:
+        """Main-thread timer: flush log/status from worker threads."""
+        try:
+            lines: list[str] = []
+            while len(lines) < 300:
+                try:
+                    lines.append(self._log_queue.get_nowait())
+                except queue.Empty:
+                    break
+            if lines:
+                self.log_text.configure(state="normal")
+                self.log_text.insert("end", "\n".join(lines) + "\n")
+                try:
+                    line_count = int(float(self.log_text.index("end-1c").split(".")[0]))
+                except (tk.TclError, ValueError):
+                    line_count = 0
+                if line_count > 6000:
+                    self.log_text.delete("1.0", "2500.0")
+                self.log_text.see("end")
+                self.log_text.configure(state="disabled")
+        except tk.TclError:
+            pass
+
+        try:
+            with self._status_lock:
+                pending = self._pending_status
+                self._pending_status = None
+            if pending is not None:
+                pct, msg = pending
+                self._set_progress_value(pct)
+                self.status_var.set(msg)
+        except tk.TclError:
+            pass
+
+        delay = 20 if not self._log_queue.empty() else 60
+        self.after(delay, self._poll_ui_queues)
+
+    def _flush_ui_queues(self) -> None:
+        """Drain pending UI updates immediately (call on main thread)."""
+        try:
+            lines: list[str] = []
+            while True:
+                try:
+                    lines.append(self._log_queue.get_nowait())
+                except queue.Empty:
+                    break
+            if lines:
+                self.log_text.configure(state="normal")
+                self.log_text.insert("end", "\n".join(lines) + "\n")
+                self.log_text.see("end")
+                self.log_text.configure(state="disabled")
+            with self._status_lock:
+                pending = self._pending_status
+                self._pending_status = None
+            if pending is not None:
+                pct, msg = pending
+                self._set_progress_value(pct)
+                self.status_var.set(msg)
+        except tk.TclError:
+            pass
+
+    def _clear_log(self) -> None:
+        try:
+            self.log_text.configure(state="normal")
+            self.log_text.delete("1.0", "end")
+            self.log_text.configure(state="disabled")
+        except tk.TclError:
+            pass
+        while True:
+            try:
+                self._log_queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _append_log(self, message: str) -> None:
+        text = message.rstrip()
+        if text:
+            self._log_queue.put(text)
 
     def _set_status(self, percent: float, message: str) -> None:
-        def update() -> None:
-            self.progress["value"] = max(0.0, min(100.0, percent))
-            self.status_var.set(message)
-
-        self.after(0, update)
+        with self._status_lock:
+            self._pending_status = (percent, message)
 
     def _paste_clipboard(self) -> None:
         try:
@@ -764,6 +951,164 @@ class YouTubeDownloaderApp(tk.Tk):
             parent=self,
         )
 
+    def _set_clip_dir(self, folder: str) -> None:
+        self._clip_dir_is_placeholder = False
+        self.clip_dir_var.set(folder)
+        if hasattr(self, "_clip_dir_label"):
+            self._clip_dir_label.configure(fg=C["text_secondary"])
+        self._save_config()
+
+    def _choose_clip_dir(self) -> None:
+        initial = self.clip_dir_var.get().strip()
+        if self._clip_dir_is_placeholder:
+            initial = str(self._default_clip_dir())
+        chosen = self._pick_folder(t("clip.pick_folder_title"), initial)
+        if not chosen:
+            return
+        try:
+            Path(chosen).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showwarning(
+                t("msg.dir.bad_title"),
+                t("msg.dir.bad", err=exc),
+                parent=self,
+            )
+            return
+        self._set_clip_dir(chosen)
+        messagebox.showinfo(
+            t("msg.dir.ok_title"),
+            t("clip.dir.ok", path=chosen),
+            parent=self,
+        )
+
+    def _set_clip_cache_dir(self, folder: str) -> None:
+        self._clip_cache_dir_is_placeholder = False
+        self.clip_cache_dir_var.set(folder)
+        if hasattr(self, "_clip_cache_dir_label"):
+            self._clip_cache_dir_label.configure(fg=C["text_secondary"])
+
+    def _choose_clip_cache_dir(self) -> None:
+        initial = self.clip_cache_dir_var.get().strip()
+        if self._clip_cache_dir_is_placeholder:
+            initial = str(self._default_clip_cache_dir())
+        chosen = self._pick_folder(t("clip.pick_cache_title"), initial)
+        if not chosen:
+            return
+        try:
+            Path(chosen).mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror(
+                t("msg.dir.bad_title"),
+                t("msg.dir.mkdir_fail", path=chosen, err=exc),
+                parent=self,
+            )
+            return
+        self._set_clip_cache_dir(chosen)
+        self._save_config()
+        messagebox.showinfo(
+            t("clip.cache.ok_title"),
+            t("clip.cache.ok", path=chosen),
+            parent=self,
+        )
+
+    def _clear_clip_cache(self) -> None:
+        if self._worker and self._worker.is_alive():
+            messagebox.showinfo(
+                t("msg.wait.title"),
+                t("msg.wait.busy"),
+                parent=self,
+            )
+            return
+
+        path = self._clip_cache_dir_from_ui() or self._default_clip_cache_dir()
+        if not path.is_dir():
+            messagebox.showinfo(
+                t("clip.cache.clear_title"),
+                t("clip.cache.clear_empty"),
+                parent=self,
+            )
+            return
+
+        entries = list(path.iterdir())
+        if not entries:
+            messagebox.showinfo(
+                t("clip.cache.clear_title"),
+                t("clip.cache.clear_empty"),
+                parent=self,
+            )
+            return
+
+        if not messagebox.askyesno(
+            t("clip.cache.clear_title"),
+            t("clip.cache.clear_confirm", path=path, count=len(entries)),
+            parent=self,
+        ):
+            return
+
+        removed = 0
+        errors: list[str] = []
+        for item in entries:
+            try:
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                    removed += 1
+                elif item.is_dir():
+                    shutil.rmtree(item)
+                    removed += 1
+            except OSError as exc:
+                errors.append(f"{item.name}: {exc}")
+
+        if errors:
+            messagebox.showwarning(
+                t("clip.cache.clear_partial_title"),
+                t("clip.cache.clear_partial", path=path, n=removed, err="\n".join(errors)),
+                parent=self,
+            )
+        else:
+            messagebox.showinfo(
+                t("clip.cache.clear_title"),
+                t("clip.cache.clear_done", path=path, n=removed),
+                parent=self,
+            )
+        self._append_log(t("log.clip.cache_cleared", path=path, n=removed))
+
+    def _open_clip_cache_dir(self) -> None:
+        path = self._clip_cache_dir_from_ui() or self._default_clip_cache_dir()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror(
+                t("msg.dir.bad_title"),
+                t("msg.dir.mkdir_fail", path=path, err=exc),
+                parent=self,
+            )
+            return
+        try:
+            import os
+
+            os.startfile(path)  # type: ignore[attr-defined]
+        except OSError as exc:
+            messagebox.showerror(
+                t("msg.dir.bad_title"),
+                t("msg.dir.open_fail", path=path, err=exc),
+                parent=self,
+            )
+
+    def _open_clip_dir(self) -> None:
+        path = self._clip_dir_from_ui() or self._default_clip_dir()
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showwarning(
+                t("msg.dir.bad_title"),
+                t("msg.dir.open_fail", path=path, err=exc),
+                parent=self,
+            )
+            return
+        import os
+
+        os.startfile(path)
+
     def _open_download_dir(self) -> None:
         path = self._download_dir_from_ui() or self._env.download_dir
         try:
@@ -792,6 +1137,8 @@ class YouTubeDownloaderApp(tk.Tk):
         self.download_btn.configure(state="disabled" if busy else "normal")
         self.cancel_btn.configure(state="normal" if busy else "disabled")
         self.format_combo.configure(state="disabled" if busy else "readonly")
+        if hasattr(self, "_clip_page"):
+            self._clip_page._clip_btn.configure(state="disabled" if busy else "normal")
 
     def _set_install_busy(self, busy: bool) -> None:
         state = "disabled" if busy else "normal"
@@ -809,6 +1156,8 @@ class YouTubeDownloaderApp(tk.Tk):
         state = "disabled" if busy else "normal"
         self._update_btn.configure(state=state)
         self.download_btn.configure(state=state)
+        if hasattr(self, "_clip_page"):
+            self._clip_page._clip_btn.configure(state=state)
         self.lang_combo.configure(state="disabled" if busy else "readonly")
 
     def _ask_update_confirm(self, release: ReleaseInfo, *, startup: bool) -> bool:
@@ -904,6 +1253,7 @@ class YouTubeDownloaderApp(tk.Tk):
             finally:
 
                 def on_finish() -> None:
+                    self._flush_ui_queues()
                     self._set_update_busy(False)
                     self.status_var.set(t("status.ready"))
 
@@ -1016,7 +1366,7 @@ class YouTubeDownloaderApp(tk.Tk):
         self._set_install_busy(True)
         self._append_log(t("log.install.start", title=title))
         self.status_var.set(t("status.installing", title=title))
-        self.progress["value"] = 0
+        self._set_progress_value(0)
 
         def worker() -> None:
             try:
@@ -1048,8 +1398,13 @@ class YouTubeDownloaderApp(tk.Tk):
                     ),
                 )
             finally:
-                self.after(0, lambda: self._set_install_busy(False))
-                self.after(0, lambda: self.status_var.set(t("status.ready")))
+
+                def _finish_install() -> None:
+                    self._flush_ui_queues()
+                    self._set_install_busy(False)
+                    self.status_var.set(t("status.ready"))
+
+                self.after(0, _finish_install)
 
         self._worker = threading.Thread(target=worker, daemon=True)
         self._worker.start()
@@ -1116,6 +1471,125 @@ class YouTubeDownloaderApp(tk.Tk):
     def _install_dependencies(self, include_node: bool = True) -> None:
         self._install_all()
 
+    def start_clip_jobs(self, jobs: list[ClipUrlJob]) -> None:
+        if self._worker and self._worker.is_alive():
+            return
+
+        if missing_components(self._current_install_paths()):
+            if messagebox.askyesno(t("msg.missing.title"), t("msg.missing.dl")):
+                self._install_all()
+            return
+
+        if not self._env.ffmpeg_available:
+            messagebox.showwarning(
+                t("msg.missing.title"),
+                t("msg.missing.body", items="ffmpeg"),
+                parent=self,
+            )
+            return
+
+        output_dir = self._clip_dir_from_ui()
+        if output_dir is None:
+            messagebox.showwarning(
+                t("msg.dir.bad_title"),
+                t("clip.dir.need_pick"),
+                parent=self,
+            )
+            return
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror(
+                t("msg.dir.bad_title"),
+                t("msg.dir.mkdir_fail", path=output_dir, err=exc),
+                parent=self,
+            )
+            return
+
+        cache_dir = self._clip_cache_dir_from_ui()
+        if cache_dir is None:
+            messagebox.showwarning(
+                t("msg.dir.bad_title"),
+                t("clip.cache.need_pick"),
+                parent=self,
+            )
+            return
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror(
+                t("msg.dir.bad_title"),
+                t("msg.dir.mkdir_fail", path=cache_dir, err=exc),
+                parent=self,
+            )
+            return
+
+        cookie_path = (
+            Path(self.cookie_var.get().strip()) if self.cookie_var.get().strip() else None
+        )
+        if cookie_path and not cookie_path.is_file():
+            messagebox.showwarning("Cookies", t("msg.cookie.missing"))
+            return
+
+        self._save_config()
+        self._cancel_flag = False
+        self._set_busy(True)
+        self._set_progress_value(0)
+        self.status_var.set(t("status.clipping"))
+        self._select_log_tab()
+        self._clear_log()
+        self._append_log(t("log.clip.start"))
+        self._append_log(t("log.clip.dir", dir=output_dir))
+        self._append_log(t("log.clip.cache", dir=cache_dir))
+        self._flush_ui_queues()
+
+        def worker() -> None:
+            runner = ClipRunner(
+                log=self._append_log,
+                status=self._set_status,
+                cancel_check=lambda: self._cancel_flag,
+            )
+            try:
+                ok, failed = runner.run(
+                    jobs,
+                    output_dir,
+                    self._format_key(),
+                    cache_dir=cache_dir,
+                    cookie_file=cookie_path,
+                )
+                summary = t("log.clip.done", summary=f"{ok} ok, {failed} failed")
+                self._append_log(summary)
+                self.after(
+                    0,
+                    lambda s=summary, folder=output_dir: messagebox.showinfo(
+                        t("msg.clip.done_title"),
+                        f"{s}\n{folder}",
+                    ),
+                )
+            except DownloadCancelled:
+                self._append_log(t("log.clip.cancelled"))
+                self.after(0, lambda: self.status_var.set(t("status.cancelled")))
+            except Exception as exc:
+                self._append_log(t("log.install.fail", err=str(exc)))
+                self.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        t("update.fail_title"),
+                        str(exc),
+                        parent=self,
+                    ),
+                )
+            finally:
+
+                def _finish_clip() -> None:
+                    self._flush_ui_queues()
+                    self._set_busy(False)
+
+                self.after(0, _finish_clip)
+
+        self._worker = threading.Thread(target=worker, daemon=True)
+        self._worker.start()
+
     def _start_download(self) -> None:
         if self._worker and self._worker.is_alive():
             return
@@ -1165,11 +1639,13 @@ class YouTubeDownloaderApp(tk.Tk):
         self._save_config()
         self._cancel_flag = False
         self._set_busy(True)
-        self.progress["value"] = 0
+        self._set_progress_value(0)
         self.status_var.set(t("status.preparing"))
+        self._select_log_tab()
         self._append_log(t("log.dl.start"))
         self._append_log(t("log.dl.format", fmt=format_label(self._format_key())))
         self._append_log(t("log.dl.dir", dir=output_dir))
+        self._flush_ui_queues()
 
         def worker() -> None:
             downloader = Downloader(
@@ -1206,7 +1682,12 @@ class YouTubeDownloaderApp(tk.Tk):
                 self._append_log(t("log.dl.error", err=exc))
                 self.after(0, lambda: messagebox.showerror(t("msg.fail.title"), str(exc)))
             finally:
-                self.after(0, lambda: self._set_busy(False))
+
+                def _finish_download() -> None:
+                    self._flush_ui_queues()
+                    self._set_busy(False)
+
+                self.after(0, _finish_download)
 
         self._worker = threading.Thread(target=worker, daemon=True)
         self._worker.start()

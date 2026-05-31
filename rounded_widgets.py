@@ -272,6 +272,7 @@ class RoundedCard(tk.Frame):
         padding: int = 12,
         radius: int = 14,
         expand_vertical: bool = False,
+        compact: bool = False,
         **kwargs,
     ) -> None:
         page_bg = _parent_bg(parent)
@@ -279,8 +280,9 @@ class RoundedCard(tk.Frame):
         self._page_bg = page_bg
         self._title = title
         self._padding = padding
-        self._radius = radius
+        self._radius = 10 if compact else radius
         self._expand_vertical = expand_vertical
+        self._compact = compact
 
         self._canvas = tk.Canvas(
             self,
@@ -295,15 +297,16 @@ class RoundedCard(tk.Frame):
 
         self._title_label: tk.Label | None = None
         if title:
+            title_font = (FONT_BOLD[0], 9, "bold") if compact else FONT_BOLD
             self._title_label = tk.Label(
                 self.content,
                 text=title,
                 bg=C["surface"],
                 fg=C["text"],
-                font=FONT_BOLD,
+                font=title_font,
                 anchor="w",
             )
-            self._title_label.pack(anchor="w", pady=(0, 6))
+            self._title_label.pack(anchor="w", pady=(0, 3 if compact else 6))
 
         self.content.bind("<Configure>", self._sync_shape, add="+")
         self.bind("<Configure>", self._sync_shape, add="+")
@@ -361,6 +364,7 @@ class RoundedField(tk.Frame):
         *,
         height: int = 36,
         radius: int = 10,
+        compact: bool = False,
         **kwargs,
     ) -> None:
         page_bg = _parent_bg(parent)
@@ -368,6 +372,9 @@ class RoundedField(tk.Frame):
         self._radius = radius
         self._height = height
         self._page_bg = page_bg
+        self._compact = compact
+        entry_width = kwargs.pop("width", None)
+        self._entry_width = int(entry_width) if entry_width else 4
 
         self._canvas = tk.Canvas(
             self,
@@ -376,7 +383,10 @@ class RoundedField(tk.Frame):
             borderwidth=0,
             bg=page_bg,
         )
-        self._canvas.pack(fill="x", expand=True)
+        if compact:
+            self._canvas.pack(side="left", fill="none", expand=False)
+        else:
+            self._canvas.pack(fill="x", expand=True)
         self._canvas.bind("<Configure>", self._redraw_border)
 
         entry_kwargs = dict(
@@ -389,6 +399,9 @@ class RoundedField(tk.Frame):
             font=FONT,
             highlightthickness=0,
         )
+        if compact:
+            entry_kwargs["width"] = self._entry_width
+            entry_kwargs["justify"] = "center"
         entry_kwargs.update(kwargs)
         self.entry = tk.Entry(self._canvas, **entry_kwargs)
         self._window = self._canvas.create_window(
@@ -405,8 +418,15 @@ class RoundedField(tk.Frame):
         self.entry.focus_set()
 
     def _redraw_border(self, event: Optional[tk.Event] = None) -> None:
-        w = int(event.width if event else self._canvas.winfo_width() or 200)
         h = self._height
+        if self._compact:
+            font = tkfont.Font(font=FONT)
+            char_w = max(font.measure("0"), font.metrics("avgcharwidth"))
+            w = int(char_w * self._entry_width + self._radius * 2 + 20)
+            w = max(w, 44)
+            self._canvas.configure(width=w)
+        else:
+            w = int(event.width if event else self._canvas.winfo_width() or 200)
         self._canvas.delete("border")
         draw_round_rect(
             self._canvas,
@@ -420,7 +440,7 @@ class RoundedField(tk.Frame):
             width=1,
             tags="border",
         )
-        inner_w = max(w - self._radius * 2 - 12, 40)
+        inner_w = max(w - self._radius * 2 - 12, 24 if self._compact else 40)
         self._canvas.itemconfigure(self._window, width=inner_w)
         self._canvas.coords(self._window, self._radius + 6, h // 2)
 

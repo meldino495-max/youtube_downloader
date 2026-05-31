@@ -159,6 +159,18 @@ def find_ffmpeg_exe(paths: Optional[InstallPaths] = None) -> Optional[Path]:
     return None
 
 
+def find_ffprobe_exe(paths: Optional[InstallPaths] = None) -> Optional[Path]:
+    install_paths = paths or InstallPaths.from_config()
+    for name in ("ffprobe.exe", "ffprobe"):
+        candidate = install_paths.ffmpeg_dir / name
+        if candidate.is_file():
+            return candidate
+    system = _find_on_path("ffprobe")
+    if system:
+        return system
+    return None
+
+
 def normalize_install_targets(paths: InstallPaths) -> InstallPaths:
     """Use app-local tools/ dirs as install targets when saved paths have no binaries."""
     defaults = InstallPaths.defaults()

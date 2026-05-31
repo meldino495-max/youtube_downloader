@@ -128,12 +128,36 @@ def card_frame(
     padding: int = 12,
     *,
     expand_vertical: bool = False,
+    compact: bool = False,
 ) -> RoundedCard:
     return RoundedCard(
         parent,
         title=text,
         padding=padding,
         expand_vertical=expand_vertical,
+        compact=compact,
+    )
+
+
+def compact_folder_picker_button(
+    parent, text: str, command: Callable, **kwargs
+) -> tk.Button:
+    """Smaller folder picker for dense toolbars."""
+    return tk.Button(
+        parent,
+        text=text,
+        command=command,
+        bg=C["accent_soft"],
+        fg=C["accent_dark"],
+        activebackground="#ffd6d6",
+        activeforeground=C["accent_dark"],
+        font=(FONT_BOLD[0], 9, "bold"),
+        relief="flat",
+        padx=8,
+        pady=2,
+        cursor="hand2",
+        highlightthickness=0,
+        **kwargs,
     )
 
 
@@ -155,6 +179,7 @@ def path_entry(parent, textvariable: tk.Variable, **kwargs) -> tk.Entry:
 
 
 def rounded_entry(parent, textvariable: tk.Variable, **kwargs) -> RoundedField:
+    """Pass ``compact=True`` for fixed-width numeric fields that must not stretch."""
     return RoundedField(parent, textvariable, **kwargs)
 
 
